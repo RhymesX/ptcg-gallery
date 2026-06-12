@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ptcgGallery - 登录</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <style>
+        .login-shell {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .login-card {
+            background: var(--panel);
+            border-radius: 20px;
+            padding: 40px 36px;
+            box-shadow: var(--shadow);
+            width: min(400px, 90vw);
+            text-align: center;
+        }
+        .login-card h1 {
+            margin: 0 0 8px;
+            font-size: 28px;
+        }
+        .login-card .sub {
+            color: var(--muted);
+            margin: 0 0 28px;
+            font-size: 14px;
+        }
+        .login-card .field {
+            text-align: left;
+            margin-bottom: 16px;
+        }
+        .login-card .field label {
+            display: block;
+            margin-bottom: 4px;
+            font-size: 13px;
+        }
+        .login-card button {
+            width: 100%;
+            margin-top: 8px;
+            padding: 12px;
+            font-size: 16px;
+        }
+        .login-error {
+            color: var(--danger);
+            margin-bottom: 12px;
+            font-size: 14px;
+            min-height: 20px;
+        }
+    </style>
+</head>
+<body class="login-shell">
+    <div class="login-card">
+        <h1>ptcgGallery</h1>
+        <p class="sub">请输入用户名和密码以继续</p>
+
+        <div class="login-error">{{ error or '' }}</div>
+
+        <form method="post" action="/login">
+            <div class="field">
+                <label for="username">用户名</label>
+                <input id="username" name="username" type="text" placeholder="输入用户名" required autofocus>
+            </div>
+            <div class="field">
+                <label for="password">密码</label>
+                <input id="password" name="password" type="password" placeholder="输入密码" required>
+            </div>
+            <button type="submit">登 录</button>
+        </form>
+    </div>
+</body>
+</html>

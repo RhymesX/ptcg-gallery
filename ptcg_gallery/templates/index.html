@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ptcgGallery - PTCG 卡牌库存站</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<div class="page-shell">
+    <header class="hero">
+        <div>
+            <h1>ptcgGallery</h1>
+            <p>本地运行、SQLite 落地、支持 Excel 卡表、库存与卡组管理。</p>
+        </div>
+        <div class="stats" id="summaryCards"></div>
+    </header>
+
+    <main class="layout">
+        <section class="panel search-panel">
+            <h2>搜索卡牌</h2>
+            <label class="field-label" for="searchInput">支持三种方式：</label>
+            <ul class="hint-list">
+                <li><code>商品编号-卡牌编号</code> 精确搜索，例如 <code>CSM1aC-002</code></li>
+                <li>卡牌名称连续关键字搜索</li>
+                <li>PROMO 解析后的商品编号 / 商品名搜索，例如 <code>SM-P-002</code>、<code>上海糖</code></li>
+            </ul>
+            <div class="search-filter-block">
+                <div class="search-filter-head">
+                    <span class="field-label">赛制筛选</span>
+                    <span class="muted">可多选；全部不选表示不限。</span>
+                </div>
+                <div id="searchRegulationFilters" class="search-regulation-filters"></div>
+                <label class="search-filter-toggle" for="searchSameNameRegulationToggle">
+                    <input id="searchSameNameRegulationToggle" type="checkbox">
+                    <span>同名卡按赛制组判断</span>
+                    <span class="muted">勾选后，只要同名卡组里有命中赛制的卡，也会出现在搜索结果里。</span>
+                </label>
+            </div>
+            <div class="search-row">
+                <input id="searchInput" type="text" placeholder="输入编号、卡牌名或解析后的商品名">
+                <button id="refreshSearchBtn" type="button">搜索</button>
+            </div>
+            <div class="toolbar compact">
+                <button id="importDefaultCatalogBtn" type="button">更新 data/卡表.xlsx</button>
+                <label class="upload-button">
+                    上传新的卡表.xlsx
+                    <input id="catalogUploadInput" type="file" accept=".xlsx" hidden>
+                </label>
+            </div>
+            <p class="status-line" id="searchStatus">请输入关键字开始搜索。</p>
+            <div class="result-list" id="resultList"></div>
+        </section>
+
+        <section class="panel detail-panel">
+            <h2>卡牌详情与库存</h2>
+            <div id="cardDetail" class="empty-state">从左侧搜索并点击一张卡牌后，这里才会显示详情。</div>
+        </section>
+
+        <section class="panel side-panel">
+            <h2>卡组与数据</h2>
+
+            <div class="account-panel">
+                <div class="section-head compact-head">
+                    <h3 class="section-title">账号</h3>
+                    <span class="section-count" id="currentAccountName">加载中</span>
+                </div>
+                <div class="account-switch-row">
+                    <select id="accountSelect" aria-label="切换账号"></select>
+                    <button id="switchAccountBtn" type="button" class="secondary">切换</button>
+                </div>
+                <div class="account-create-row">
+                    <input id="accountNameInput" type="text" placeholder="新增账号名称">
+                    <button id="createAccountBtn" type="button">新增</button>
+                </div>
+                <div class="toolbar compact account-actions">
+                    <button id="deleteAccountBtn" type="button" class="danger">删除当前账号</button>
+                </div>
+                <p class="status-line" id="accountStatus">卡表目录共用，库存和卡组按账号独立保存。</p>
+            </div>
+
+            <div class="toolbar compact">
+                <a class="button-link" href="/decks">打开卡组管理</a>
+                <a class="button-link secondary" href="/inventory-table">打开库存表格</a>
+            </div>
+
+            <div class="toolbar compact">
+                <a class="button-link" href="/api/export/state">导出账号 JSON</a>
+                <label class="upload-button secondary">
+                    导入账号 JSON
+                    <input id="stateUploadInput" type="file" accept=".json" hidden>
+                </label>
+            </div>
+
+            <div class="toolbar compact">
+                <a class="button-link" href="/api/export/inventory">导出库存 JSON</a>
+                <label class="upload-button secondary">
+                    导入库存 JSON
+                    <input id="inventoryUploadInput" type="file" accept=".json" hidden>
+                </label>
+            </div>
+
+            <div class="crawler-panel">
+                <div class="section-head compact-head">
+                    <h3 class="section-title">卡图下载</h3>
+                    <span class="section-count" id="crawlerModeLabel">仅本地</span>
+                </div>
+                <div class="crawler-buttons">
+                    <button id="crawlerOffBtn" type="button" class="secondary crawler-mode-btn is-active">仅本地</button>
+                    <button id="crawlerDemandBtn" type="button" class="secondary crawler-mode-btn">点开下载</button>
+                    <button id="crawlerOnBtn" type="button" class="secondary crawler-mode-btn">持续爬取</button>
+                    <button id="crawlerScheduledBtn" type="button" class="secondary crawler-mode-btn">凌晨3点</button>
+                </div>
+                <p class="status-line" id="crawlerStatus">当前：仅本地图片（不自动下载）</p>
+            </div>
+
+            <p class="status-line" id="deckStatus">卡组详情与编辑已移动到独立页面。</p>
+        </section>
+    </main>
+</div>
+
+
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
+

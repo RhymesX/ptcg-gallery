@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>卡组管理 - ptcgGallery</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<div class="page-shell deck-page">
+    <header class="hero deck-hero">
+        <div>
+            <a class="back-link" href="/">← 返回主页</a>
+            <h1>卡组管理</h1>
+            <p>在这里添加、修改、删除卡组，并设置卡组颜色。删除卡组时，卡组内卡片会自动回到空闲库存。</p>
+        </div>
+        <div class="toolbar compact deck-page-links">
+            <a class="button-link secondary" href="/inventory-table">打开库存表格</a>
+            <a class="button-link" href="/api/export/state">导出库存/卡组 JSON</a>
+        </div>
+    </header>
+
+    <main class="deck-admin-layout">
+        <section class="panel deck-admin-panel">
+            <h2>新增 / 编辑卡组</h2>
+            <form id="deckForm" class="stack-form">
+                <input type="hidden" id="deckIdInput">
+                <label>
+                    卡组名称
+                    <input id="deckNameInput" type="text" placeholder="例如：喷火龙构筑">
+                </label>
+                <label>
+                    描述
+                    <textarea id="deckDescriptionInput" rows="3" placeholder="可选：卡组用途、版本等"></textarea>
+                </label>
+                <label>
+                    颜色
+                    <input id="deckColorInput" type="color" value="#9ca3af">
+                </label>
+                <div class="toolbar">
+                    <button type="submit" id="saveDeckBtn">保存卡组</button>
+                    <button type="button" id="resetDeckBtn" class="secondary">清空表单</button>
+                </div>
+            </form>
+            <p class="status-line" id="deckStatus">可以新建、修改、删除卡组，也可以设置卡组颜色。</p>
+        </section>
+
+        <section class="panel deck-admin-panel">
+            <h2>卡组列表</h2>
+            <div id="deckList" class="deck-manage-list"></div>
+        </section>
+    </main>
+</div>
+
+<template id="deckRowTemplate">
+    <article class="deck-manage-card">
+        <div class="deck-manage-head">
+            <button type="button" class="deck-order-handle" aria-label="拖拽调整顺序" title="拖拽调整顺序">⋮⋮</button>
+            <div class="deck-color-swatch"></div>
+            <div class="deck-meta">
+                <strong class="deck-name"></strong>
+                <span class="deck-count"></span>
+                <p class="deck-description"></p>
+            </div>
+        </div>
+        <div class="toolbar compact deck-actions">
+            <a class="button-link secondary deck-detail-link" href="#">查看详情</a>
+            <button type="button" class="edit-deck secondary">编辑</button>
+            <button type="button" class="delete-deck danger" title="整体删除卡组" aria-label="整体删除卡组">删除</button>
+        </div>
+    </article>
+</template>
+
+<script src="{{ url_for('static', filename='decks.js') }}"></script>
+</body>
+</html>
+

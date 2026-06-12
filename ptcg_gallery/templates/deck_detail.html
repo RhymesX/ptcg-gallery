@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>卡组详情 - ptcgGallery</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<div class="page-shell deck-detail-page">
+    <header class="hero deck-detail-hero">
+        <div>
+            <a class="back-link" href="/decks">← 返回卡组管理</a>
+            <h1 id="deckTitle">卡组详情</h1>
+            <p id="deckSubtitle">加载中...</p>
+        </div>
+        <div class="toolbar compact deck-page-links">
+            <a class="button-link secondary" href="/inventory-table">打开库存表格</a>
+            <a class="button-link" href="/decks">卡组管理</a>
+        </div>
+    </header>
+
+    <main class="deck-detail-layout">
+        <section class="panel deck-summary-panel" id="deckSummary"></section>
+        <section class="panel deck-cards-panel">
+            <div class="section-head">
+                <h2 class="section-title">卡组内容</h2>
+                <span class="section-count" id="deckCardCount"></span>
+            </div>
+            <div id="deckCards" class="deck-cards"></div>
+        </section>
+    </main>
+</div>
+
+<div id="deckCardModal" class="inventory-modal" hidden>
+    <div class="inventory-modal-backdrop" data-action="close-card-modal"></div>
+    <div class="inventory-modal-card deck-card-modal-card" role="dialog" aria-modal="true" aria-labelledby="deckCardModalTitle">
+        <div class="inventory-modal-head">
+            <div>
+                <h2 id="deckCardModalTitle">卡牌操作</h2>
+                <p class="inventory-modal-subtitle muted" id="deckCardModalSubtitle"></p>
+            </div>
+            <button type="button" class="secondary inventory-modal-close-icon" id="deckCardModalCloseTop" aria-label="关闭弹窗">×</button>
+        </div>
+        <p class="status-line inventory-modal-status" id="deckCardModalStatus"></p>
+        <div id="deckCardModalBody" class="deck-card-modal-body"></div>
+        <div class="toolbar compact inventory-modal-actions">
+            <button type="button" class="secondary" id="deckCardModalCloseBtn">关闭</button>
+        </div>
+    </div>
+</div>
+
+<div id="cardDetailPopup" class="inventory-modal" hidden>
+    <div class="inventory-modal-backdrop" data-action="close-card-detail-popup"></div>
+    <div class="inventory-modal-card" role="dialog" aria-modal="true" aria-labelledby="cardDetailPopupTitle">
+        <div class="inventory-modal-head">
+            <div>
+                <h2 id="cardDetailPopupTitle">卡片详情</h2>
+                <p class="inventory-modal-subtitle muted" id="cardDetailPopupSubtitle"></p>
+            </div>
+            <button type="button" class="secondary inventory-modal-close-icon" id="cardDetailPopupCloseTop" aria-label="关闭">&times;</button>
+        </div>
+        <div id="cardDetailPopupBody" class="card-detail-popup-body"></div>
+        <div class="toolbar compact inventory-modal-actions">
+            <button type="button" class="secondary" id="cardDetailPopupCloseBtn">关闭</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    window.__DECK_ID__ = {{ deck_id }};
+</script>
+<script src="{{ url_for('static', filename='deck_detail.js') }}"></script>
+</body>
+</html>
+

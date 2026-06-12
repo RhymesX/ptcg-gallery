@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>库存表格 - ptcgGallery</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<div class="page-shell inventory-table-page">
+    <header class="hero inventory-table-hero">
+        <div>
+            <a class="back-link" href="/">← 返回主页</a>
+            <h1>库存表格</h1>
+            <p>沿用“卡牌仓库”的分类、同名分组和宝可梦排序规则，用表格集中查看并修改同名卡牌库存。</p>
+        </div>
+        <div class="holdings-hero-actions">
+            <div class="toolbar compact holdings-hero-toolbar">
+                <a class="button-link secondary" href="/decks">打开卡组管理</a>
+            </div>
+            <div class="stats" id="summaryCards"></div>
+        </div>
+    </header>
+
+    <main class="inventory-table-main">
+        <div class="holdings-note inventory-table-note">
+            <div class="holdings-note-text">
+                <strong>说明：</strong>
+                <span>每个同名组会横向展开单卡记录；每行最多展示 8 组。赛制、商品编号、空闲数量会按稀有度着色。</span>
+            </div>
+            <div class="deck-legend" id="deckLegend"></div>
+        </div>
+        <div class="inventory-rarity-legend" id="rarityLegend"></div>
+        <div class="inventory-table-filters" id="inventoryTableFilters"></div>
+        <div id="inventoryTableContent" class="inventory-table-content"></div>
+    </main>
+</div>
+
+<div id="inventoryModal" class="inventory-modal" hidden>
+    <div class="inventory-modal-backdrop"></div>
+    <div class="inventory-modal-card" role="dialog" aria-modal="true" aria-labelledby="inventoryModalTitle">
+        <div class="inventory-modal-head">
+            <div>
+                <h2 id="inventoryModalTitle">修改库存</h2>
+                <p id="inventoryModalSubtitle" class="muted inventory-modal-subtitle"></p>
+            </div>
+            <button id="inventoryModalCloseTop" type="button" class="secondary inventory-modal-close-icon" aria-label="关闭弹框">×</button>
+        </div>
+        <p id="inventoryModalStatus" class="status-line inventory-modal-status">修改后请点击“保存修改”，完成后手动关闭窗口刷新表格。</p>
+        <div id="inventoryModalTableWrap" class="inventory-modal-table-wrap"></div>
+        <div class="toolbar inventory-modal-actions">
+            <button id="inventoryModalSaveBtn" type="button">保存修改</button>
+            <button id="inventoryModalCloseBtn" type="button" class="secondary">关闭</button>
+        </div>
+    </div>
+</div>
+
+<div id="sortGroupsModal" class="inventory-modal" hidden>
+    <div class="inventory-modal-backdrop"></div>
+    <div class="inventory-modal-card sort-groups-modal-card" role="dialog" aria-modal="true">
+        <div class="inventory-modal-head">
+            <div>
+                <h2 id="sortGroupsModalTitle">调整分组排序</h2>
+                <p id="sortGroupsModalSubtitle" class="muted inventory-modal-subtitle">拖拽调整分组顺序后点击"保存"。同等级分类下的顺序会全局生效。</p>
+            </div>
+            <button id="sortGroupsModalCloseTop" type="button" class="secondary inventory-modal-close-icon" aria-label="关闭弹框">×</button>
+        </div>
+        <p id="sortGroupsModalStatus" class="status-line"></p>
+        <div id="sortGroupsModalList" class="sort-groups-list"></div>
+        <div class="toolbar inventory-modal-actions">
+            <button id="sortGroupsModalSaveBtn" type="button">保存</button>
+            <button id="sortGroupsModalCloseBtn" type="button" class="secondary">取消</button>
+        </div>
+    </div>
+</div>
+
+<script src="{{ url_for('static', filename='inventory_table.js') }}"></script>
+</body>
+</html>
