@@ -40,3 +40,12 @@ data/card_images/
 data/card_images_user/
 # 数据库（本地和生产独立）
 data/ptcg_gallery.db
+# IDE 配置
+.idea/
+*.iml
+# 压缩包
+*.zip
+# Java 无关文件
+src/
+# 数据库（本地和生产独立）
+data/ptcg_gallery.db
