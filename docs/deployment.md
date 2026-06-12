@@ -81,29 +81,21 @@ nginx -v
 
 ## 五、部署项目
 
-### 5.1 上传代码
+### 5.1 拉取代码（推荐：GitHub 私有仓库）
 
-在服务器上创建目录结构：
-
-```bash
-mkdir -p /opt/ptcgGalleryWeb/ptcg_gallery/templates
-mkdir -p /opt/ptcgGalleryWeb/ptcg_gallery/static
-mkdir -p /opt/ptcgGalleryWeb/data
-```
-
-然后通过阿里云 Workbench 网页终端，用 `nano` 逐一创建文件（把本地代码内容粘贴进去）。
-
-或者如果你能从本地 scp：
+1. 先把项目推到 GitHub/Gitee 私有仓库（参考第八节 Git 工作流）
+2. 在服务器上克隆：
 
 ```bash
-# 在本地 PowerShell 执行：
-scp -r ptcg_gallery root@<服务器IP>:/opt/ptcgGalleryWeb/
-scp run.py requirements.txt root@<服务器IP>:/opt/ptcgGalleryWeb/
-scp data/ptcg_gallery.db root@<服务器IP>:/opt/ptcgGalleryWeb/data/
-scp data/卡表.xlsx root@<服务器IP>:/opt/ptcgGalleryWeb/data/
+cd /opt
+# 如果已有旧目录先备份再删
+mv /opt/ptcgGalleryWeb /opt/ptcgGalleryWeb_old 2>/dev/null
+git clone https://github.com/你的用户名/ptcg-gallery.git ptcgGalleryWeb
 ```
 
-### 5.2 创建虚拟环境
+> 如果遇到 `GnuTLS recv error`，先 `apt update && apt upgrade -y` 升级系统再重试。
+
+### 5.2 创建虚拟环境并安装依赖
 
 ```bash
 cd /opt/ptcgGalleryWeb
@@ -113,14 +105,17 @@ python3 -m venv .venv
 
 ### 5.3 上传数据文件
 
+数据库文件不在 git 仓库中（已加入 .gitignore），需要从本地上传：
+
 ```bash
-# 从本地复制数据库和卡表（如已通过 scp 上传整个目录则跳过）
-# 本地执行：
-scp data/ptcg_gallery.db root@<IP>:/opt/ptcgGalleryWeb/data/
-scp data/卡表.xlsx root@<IP>:/opt/ptcgGalleryWeb/data/
+# 在你的本地电脑 PowerShell 执行：
+scp data/ptcg_gallery.db root@<服务器IP>:/opt/ptcgGalleryWeb/data/
+scp data/卡表.xlsx root@<服务器IP>:/opt/ptcgGalleryWeb/data/
 ```
 
-### 5.3 测试运行
+如果无法 SSH，可通过阿里云 Workbench → 文件管理上传。
+
+### 5.4 测试运行
 
 ```bash
 cd /opt/ptcgGalleryWeb
@@ -226,33 +221,44 @@ sudo systemctl restart ptcggallery
 
 ## 八、更新项目代码
 
-### 方式一：阿里云 Workbench + nano（无需 SSH）
+### 推荐方式：GitHub 推送 + 服务器 git pull
 
-1. 打开阿里云控制台 → ECS → 远程连接 → Workbench
-2. `nano` 编辑对应文件，粘贴修改后的内容
-3. 只改了 Python/模板 → `sudo systemctl restart ptcggallery`
-4. 改了 CSS/JS → 上传新文件 + `sudo systemctl reload nginx`
-
-### 方式二：本地用 scp 上传（如果可以 SSH）
+**首次（一次性）**：把代码推到一个私有 GitHub 仓库。
 
 ```bash
-# 在本地 PowerShell，只上传改动的文件：
-scp ptcg_gallery/__init__.py root@<IP>:/opt/ptcgGalleryWeb/ptcg_gallery/
-scp ptcg_gallery/services.py root@<IP>:/opt/ptcgGalleryWeb/ptcg_gallery/
-scp -r ptcg_gallery/static/ root@<IP>:/opt/ptcgGalleryWeb/ptcg_gallery/
-scp -r ptcg_gallery/templates/ root@<IP>:/opt/ptcgGalleryWeb/ptcg_gallery/
-
-# 然后在 Workbench 里重启服务：
-sudo systemctl restart ptcggallery
+# 本地 PowerShell
+cd f:\ptcgGallery\ptcgGalleryWeb
+git init
+git add .
+git commit -m "init"
+git remote add origin https://github.com/你的用户名/ptcg-gallery.git
+git branch -M main
+git push -u origin main
 ```
 
-### 方式三：推送到 GitHub，服务器 git pull
+**每次更新**：
+
+本地改完代码后：
 
 ```bash
+# 本地
+git add . && git commit -m "描述改动" && git push
+```
+
+服务器拉取并重启：
+
+```bash
+# 阿里云 Workbench 终端
 cd /opt/ptcgGalleryWeb
 git pull
 sudo systemctl restart ptcggallery
 ```
+
+### 备用方式：Workbench + nano（无需 SSH）
+
+1. 阿里云控制台 → ECS → 远程连接 → Workbench
+2. `nano` 编辑对应文件，粘贴修改后的内容
+3. `sudo systemctl restart ptcggallery`
 
 ### 常用操作速查
 
