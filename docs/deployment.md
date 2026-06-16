@@ -181,11 +181,11 @@ server {
         client_max_body_size 20M;
     }
 
-    # 静态文件由 Nginx 直接提供
+    # 静态文件由 Nginx 直接提供（不缓存 JS/CSS，确保更新后浏览器立即生效）
     location /static/ {
         alias /opt/ptcgGalleryWeb/ptcg_gallery/static/;
-        expires 7d;
-        add_header Cache-Control "public, immutable";
+        expires -1;
+        add_header Cache-Control "no-cache, must-revalidate";
     }
 
     # 卡图缓存
