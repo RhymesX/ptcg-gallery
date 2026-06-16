@@ -1503,6 +1503,21 @@ class CardRepository:
 
         return self.get_deck_detail(deck_id)
 
+    def move_deck_cards_to_free(self, deck_id: int) -> dict[str, Any]:
+        """将卡组中所有卡牌转回空闲库存。"""
+        with self.connect() as conn:
+            account_id = self.get_current_account_id(conn)
+            self._ensure_deck_exists(conn, deck_id)
+            rows = conn.execute(
+                "SELECT card_id, quantity FROM deck_cards WHERE deck_id = ? AND quantity > 0",
+                (deck_id,),
+            ).fetchall()
+            for row in rows:
+                current_free = self._get_free_quantity(conn, row["card_id"])
+                self._set_free_quantity(conn, row["card_id"], current_free + int(row["quantity"]))
+            conn.execute("DELETE FROM deck_cards WHERE deck_id = ?", (deck_id,))
+        return self.get_deck_detail(deck_id)
+
     def adjust_total_quantity(self, card_id: int, delta: int) -> dict[str, Any]:
         if delta == 0:
             raise ServiceError("数量变更不能为 0")

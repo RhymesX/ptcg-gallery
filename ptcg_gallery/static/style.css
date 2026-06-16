@@ -2070,6 +2070,58 @@ body.modal-open {
     background: #e8f0fe;
 }
 
+/* ── 卡组弹窗 Delta 行 ── */
+
+.deck-card-modal-delta-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.deck-card-modal-delta-row input {
+    width: 70px;
+    text-align: center;
+}
+.delta-step-btn {
+    width: 32px;
+    height: 32px;
+    font-size: 16px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.deck-card-modal-dual-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+}
+.deck-card-modal-column {
+    min-width: 0;
+}
+
+.danger-btn {
+    background: #dc2626;
+    color: #fff;
+    border: 1px solid #b91c1c;
+    border-radius: 6px;
+    padding: 6px 14px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+.danger-btn:hover {
+    background: #b91c1c;
+}
+
+.deck-card-modal-topbar {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 8px;
+    padding: 0 4px;
+}
+
 /* ── 排序弹窗 ── */
 
 .sort-groups-modal-card {

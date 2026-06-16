@@ -237,6 +237,10 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
             )
         )
 
+    @app.post("/api/decks/<int:deck_id>/move-to-free")
+    def move_deck_cards_to_free(deck_id: int):
+        return jsonify(repository.move_deck_cards_to_free(deck_id))
+
     @app.put("/api/decks/<int:deck_id>")
     def update_deck(deck_id: int):
         payload = request.get_json(force=True, silent=True) or {}
