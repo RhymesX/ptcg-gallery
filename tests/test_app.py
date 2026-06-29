@@ -49,6 +49,8 @@ class PtcgGalleryAppTests(unittest.TestCase):
             }
         )
         self.client = self.app.test_client()
+        with self.client.session_transaction() as session:
+            session["authed"] = True
 
     def tearDown(self):
         self.temp_dir.cleanup()
@@ -845,6 +847,44 @@ class PtcgGalleryAppTests(unittest.TestCase):
         self.assertEqual([item["cardName"] for item in backup_sections["item"]["items"]], ["高级球"])
         self.assertEqual([item["deckQuantity"] for item in backup_sections["item"]["items"]], [2])
         self.assertNotIn("backup", backup_sections)
+
+    def test_backup_to_main_module_reduces_backup_quantity_and_keeps_total(self):
+        create_deck_response = self.client.post(
+            "/api/decks",
+            json={"name": "备卡转回模块测试", "description": "独立模块转回主卡", "color": "#6b7c8d"},
+        )
+        self.assertEqual(create_deck_response.status_code, 201)
+        deck_id = create_deck_response.get_json()["id"]
+
+        ball_id = self._find_card_id(self.client, "高级球", "高级球")
+        self.assertEqual(
+            self.client.post(f"/api/cards/{ball_id}/add-to-deck", json={"deckId": deck_id, "amount": 4, "consumeFree": False}).status_code,
+            200,
+        )
+        self.assertEqual(
+            self.client.put(f"/api/decks/{deck_id}/cards/{ball_id}/backup-quantity", json={"quantity": 3}).status_code,
+            200,
+        )
+
+        # 从备卡转 2 张回主卡
+        move = self.client.put(
+            f"/api/decks/{deck_id}/cards/{ball_id}/backup-quantity",
+            json={"quantity": 1},
+        )
+        self.assertEqual(move.status_code, 200)
+
+        detail = self.client.get(f"/api/decks/{deck_id}")
+        self.assertEqual(detail.status_code, 200)
+        payload = detail.get_json()
+        self.assertEqual(payload["cardCount"], 4)
+        self.assertEqual(payload["mainCardCount"], 3)
+        self.assertEqual(payload["backupCardCount"], 1)
+
+        sections = {section["key"]: section for section in payload["sections"]}
+        self.assertIn("item", sections)
+        self.assertIn("backup", sections)
+        self.assertEqual([item["deckQuantity"] for item in sections["item"]["items"]], [3])
+        self.assertEqual([item["deckQuantity"] for item in sections["backup"]["items"]], [1])
 
     def test_deck_same_name_limit_blocks_add_to_deck_but_exempts_basic_energy(self):
         create_deck_response = self.client.post(
