@@ -25,6 +25,17 @@ from .services import (
 )
 
 
+def _load_session_account(repository: CardRepository) -> dict[str, Any] | None:
+    account_id = int(session.get("account_id", 0) or 0)
+    account_name = normalize_text(session.get("account_name", ""))
+    if account_id <= 0 or not account_name:
+        return None
+    account = repository.get_account_by_name(account_name)
+    if account is None or int(account.get("id", 0) or 0) != account_id:
+        return None
+    return account
+
+
 def create_app(test_config: dict[str, Any] | None = None) -> Flask:
     root_dir = Path((test_config or {}).get("ROOT_DIR") or Path(__file__).resolve().parent.parent)
     paths: AppPaths = build_paths(root_dir)
@@ -90,13 +101,17 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
     @app.before_request
     def _require_login():
         """除登录页、静态文件和 health 外，统一要求登录。"""
-        if request.endpoint in ("login_page", "login_post", "static", "health"):
+        if request.endpoint in ("login_page", "login_post", "register_account", "static", "health"):
+            repository.clear_request_account_id()
             return None
-        if not session.get("authed"):
+        account = _load_session_account(repository)
+        if account is None:
+            repository.clear_request_account_id()
             # 对 API 请求返回 401，对页面请求重定向到登录页
             if request.path.startswith("/api/"):
                 return jsonify({"error": "未登录"}), 401
             return redirect(url_for("login_page", next=request.full_path))
+        repository.set_request_account_id(int(account["id"]))
         return None
 
     @app.get("/login")
@@ -107,9 +122,16 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
     def login_post():
         username = request.form.get("username", "").strip()
         password = request.form.get("password", "").strip()
-        if username == app.config["AUTH_USERNAME"] and password == app.config["AUTH_PASSWORD"]:
-            session["authed"] = True
-            session["authed_user"] = username
+        account: dict[str, Any] | None = None
+        is_admin = username == app.config["AUTH_USERNAME"] and password == app.config["AUTH_PASSWORD"]
+        if is_admin:
+            account = repository.get_account_by_name("RhymesX")
+        else:
+            account = repository.verify_account_credentials(username, password)
+        if account is not None:
+            session["account_id"] = int(account["id"])
+            session["account_name"] = account["name"]
+            session["is_admin"] = is_admin
             next_url = request.args.get("next", "/")
             # 防止 open redirect
             if not next_url.startswith("/"):
@@ -119,6 +141,7 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
 
     @app.post("/logout")
     def logout():
+        repository.clear_request_account_id()
         session.clear()
         return redirect(url_for("login_page"))
 
@@ -152,21 +175,50 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
 
     @app.get("/api/accounts")
     def list_accounts():
-        return jsonify(repository.list_accounts())
+        account = _load_session_account(repository)
+        payload = repository.list_accounts()
+        return jsonify(payload | {"current": account, "isAdmin": bool(session.get("is_admin"))})
 
     @app.post("/api/accounts")
-    def create_account():
+    def register_account():
+        """注册新账号（任意已登录用户均可注册）。"""
         payload = request.get_json(force=True, silent=True) or {}
-        return jsonify(repository.create_account(payload.get("name", ""))), 201
+        name = (payload.get("name") or "").strip()
+        password = (payload.get("password") or "").strip()
+        if not name:
+            return jsonify({"error": "账号名称不能为空"}), 400
+        if not password or len(password) < 4:
+            return jsonify({"error": "密码至少需要 4 位"}), 400
+        result = repository.create_account(name, password)
+        return jsonify(result), 201
 
-    @app.put("/api/accounts/current")
-    def switch_account():
+    @app.put("/api/accounts/password")
+    def change_account_password():
+        """当前登录账号修改密码。"""
+        account = _load_session_account(repository)
+        if account is None:
+            return jsonify({"error": "未登录"}), 401
         payload = request.get_json(force=True, silent=True) or {}
-        return jsonify(repository.switch_account(int(payload.get("accountId", 0) or 0)))
+        old_password = (payload.get("oldPassword") or "").strip()
+        new_password = (payload.get("newPassword") or "").strip()
+        if not old_password or not new_password:
+            return jsonify({"error": "原密码和新密码均不能为空"}), 400
+        if len(new_password) < 4:
+            return jsonify({"error": "新密码至少需要 4 位"}), 400
+        repository.change_account_password(int(account["id"]), old_password, new_password)
+        return jsonify({"ok": True})
 
-    @app.delete("/api/accounts/<int:account_id>")
-    def delete_account(account_id: int):
-        return jsonify(repository.delete_account(account_id))
+    @app.put("/api/accounts/<int:account_id>/password")
+    def admin_reset_account_password(account_id: int):
+        """管理员直接重置任意普通账号密码。"""
+        if not session.get("is_admin"):
+            return jsonify({"error": "无权操作，仅管理员可用"}), 403
+        payload = request.get_json(force=True, silent=True) or {}
+        new_password = (payload.get("newPassword") or "").strip()
+        if not new_password or len(new_password) < 4:
+            return jsonify({"error": "新密码至少需要 4 位"}), 400
+        repository.reset_account_password(account_id, new_password)
+        return jsonify({"ok": True})
 
     @app.get("/api/holdings")
     def holdings():

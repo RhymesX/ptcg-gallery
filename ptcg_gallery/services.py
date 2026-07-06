@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
+import secrets
 import sqlite3
+import threading
 import unicodedata
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -207,6 +210,7 @@ CREATE TABLE IF NOT EXISTS cards (
 CREATE TABLE IF NOT EXISTS accounts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL DEFAULT '',
     sort_order INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -283,6 +287,8 @@ CREATE INDEX IF NOT EXISTS idx_deck_cards_deck_id ON deck_cards(deck_id);
 
 
 class CardRepository:
+    _account_local = threading.local()
+
     def __init__(self, db_path: str | os.PathLike[str]):
         self.db_path = str(db_path)
         self.search_preferences_path = Path(self.db_path).resolve().parent / SEARCH_PREFERENCES_FILE_NAME
@@ -310,6 +316,7 @@ class CardRepository:
             self._ensure_deck_color_column(conn)
             self._ensure_deck_sort_order_column(conn)
             self._ensure_deck_card_backup_quantity_column(conn)
+            self._ensure_account_password_hash_column(conn)
             self._ensure_account_storage(conn)
             self._normalize_supporter_wording(conn)
             self._normalize_deck_sort_order(conn)
@@ -320,7 +327,7 @@ class CardRepository:
         self._ensure_decks_account_schema(conn, account_id)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_free_inventory_account ON free_inventory(account_id, card_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_decks_account_sort_order ON decks(account_id, sort_order, id)")
-        self._ensure_current_account(conn, account_id)
+        self._ensure_default_account_password(conn)
 
     def _ensure_default_account(self, conn: sqlite3.Connection) -> int:
         row = conn.execute("SELECT id FROM accounts WHERE name = ?", (DEFAULT_ACCOUNT_NAME,)).fetchone()
@@ -333,17 +340,61 @@ class CardRepository:
         )
         return int(cursor.lastrowid)
 
-    def _ensure_current_account(self, conn: sqlite3.Connection, fallback_account_id: int):
-        row = conn.execute("SELECT value FROM app_settings WHERE key = 'current_account_id'").fetchone()
-        current_id = int(row["value"] or 0) if row is not None and str(row["value"] or "").isdigit() else 0
-        exists = conn.execute("SELECT id FROM accounts WHERE id = ?", (current_id,)).fetchone() if current_id else None
-        if exists is not None:
+    def _ensure_account_password_hash_column(self, conn: sqlite3.Connection):
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(accounts)").fetchall()}
+        if "password_hash" not in columns:
+            conn.execute("ALTER TABLE accounts ADD COLUMN password_hash TEXT NOT NULL DEFAULT ''")
+
+    def _ensure_default_account_password(self, conn: sqlite3.Connection):
+        row = conn.execute("SELECT id, password_hash FROM accounts WHERE name = ?", (DEFAULT_ACCOUNT_NAME,)).fetchone()
+        if row is None:
+            return
+        existing = normalize_text(row["password_hash"])
+        if existing:
             return
         conn.execute(
-            "INSERT INTO app_settings(key, value, updated_at) VALUES ('current_account_id', ?, CURRENT_TIMESTAMP) "
-            "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP",
-            (str(fallback_account_id),),
+            "UPDATE accounts SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (self.build_password_hash("mushroom"), int(row["id"])),
         )
+
+    @classmethod
+    def build_password_hash(cls, password: str) -> str:
+        clean_password = str(password or "")
+        if not clean_password:
+            raise ServiceError("密码不能为空")
+        salt = secrets.token_hex(16)
+        digest = hashlib.sha256(f"{salt}:{clean_password}".encode("utf-8")).hexdigest()
+        return f"{salt}${digest}"
+
+    @classmethod
+    def verify_password_hash(cls, stored_hash: str, password: str) -> bool:
+        clean_hash = normalize_text(stored_hash)
+        clean_password = str(password or "")
+        if not clean_hash or not clean_password or "$" not in clean_hash:
+            return False
+        salt, digest = clean_hash.split("$", 1)
+        expected = hashlib.sha256(f"{salt}:{clean_password}".encode("utf-8")).hexdigest()
+        return secrets.compare_digest(digest, expected)
+
+    @classmethod
+    def set_request_account_id(cls, account_id: int | None):
+        if account_id is None:
+            if hasattr(cls._account_local, "account_id"):
+                delattr(cls._account_local, "account_id")
+            return
+        cls._account_local.account_id = int(account_id)
+
+    @classmethod
+    def clear_request_account_id(cls):
+        cls.set_request_account_id(None)
+
+    def _resolve_account_id_from_context(self, conn: sqlite3.Connection) -> int:
+        context_id = getattr(self._account_local, "account_id", None)
+        if context_id is not None:
+            exists = conn.execute("SELECT id FROM accounts WHERE id = ?", (int(context_id),)).fetchone()
+            if exists is not None:
+                return int(context_id)
+        return self._ensure_default_account(conn)
 
     def _ensure_free_inventory_account_schema(self, conn: sqlite3.Connection, default_account_id: int):
         columns = {row[1] for row in conn.execute("PRAGMA table_info(free_inventory)").fetchall()}
@@ -524,13 +575,7 @@ class CardRepository:
 
     def get_current_account_id(self, conn: sqlite3.Connection) -> int:
         self._ensure_account_storage(conn)
-        row = conn.execute("SELECT value FROM app_settings WHERE key = 'current_account_id'").fetchone()
-        if row is not None and str(row["value"] or "").isdigit():
-            account_id = int(row["value"])
-            exists = conn.execute("SELECT id FROM accounts WHERE id = ?", (account_id,)).fetchone()
-            if exists is not None:
-                return account_id
-        return self._ensure_default_account(conn)
+        return self._resolve_account_id_from_context(conn)
 
     def list_accounts(self) -> dict[str, Any]:
         with self.connect() as conn:
@@ -568,33 +613,33 @@ class CardRepository:
         current = next((account for account in accounts if account["isCurrent"]), accounts[0] if accounts else None)
         return {"items": accounts, "current": current}
 
-    def create_account(self, name: str) -> dict[str, Any]:
+    def create_account(self, name: str, password: str = "123456") -> dict[str, Any]:
         clean_name = normalize_text(name)
         if not clean_name:
             raise ServiceError("账号名称不能为空")
+        clean_password = (password or "").strip()
+        if not clean_password:
+            raise ServiceError("密码不能为空")
+        if len(clean_password) < 4:
+            raise ServiceError("密码至少需要 4 位")
         with self.connect() as conn:
             try:
                 next_sort_order = conn.execute("SELECT COALESCE(MAX(sort_order), 0) + 1 FROM accounts").fetchone()[0]
                 cursor = conn.execute(
-                    "INSERT INTO accounts(name, sort_order, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)",
-                    (clean_name, next_sort_order),
+                    "INSERT INTO accounts(name, password_hash, sort_order, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)",
+                    (clean_name, self.build_password_hash(clean_password), next_sort_order),
                 )
             except sqlite3.IntegrityError as exc:
                 raise ConflictError(f"账号“{clean_name}”已存在") from exc
             account_id = int(cursor.lastrowid)
-            self._ensure_default_decks_for_account(conn, account_id)
-        return self.switch_account(account_id)
+        return self.list_accounts()
 
     def switch_account(self, account_id: int) -> dict[str, Any]:
         with self.connect() as conn:
             row = conn.execute("SELECT id FROM accounts WHERE id = ?", (int(account_id),)).fetchone()
             if row is None:
                 raise NotFoundError("账号不存在")
-            conn.execute(
-                "INSERT INTO app_settings(key, value, updated_at) VALUES ('current_account_id', ?, CURRENT_TIMESTAMP) "
-                "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP",
-                (str(int(account_id)),),
-            )
+            self.set_request_account_id(int(account_id))
         return self.list_accounts()
 
     def delete_account(self, account_id: int) -> dict[str, Any]:
@@ -606,16 +651,68 @@ class CardRepository:
             row = conn.execute("SELECT id, name FROM accounts WHERE id = ?", (account_id,)).fetchone()
             if row is None:
                 raise NotFoundError("账号不存在")
-            current_account_id = self.get_current_account_id(conn)
             conn.execute("DELETE FROM accounts WHERE id = ?", (account_id,))
-            if current_account_id == account_id:
-                next_account = conn.execute("SELECT id FROM accounts ORDER BY sort_order ASC, id ASC LIMIT 1").fetchone()
-                conn.execute(
-                    "INSERT INTO app_settings(key, value, updated_at) VALUES ('current_account_id', ?, CURRENT_TIMESTAMP) "
-                    "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP",
-                    (str(next_account["id"]),),
-                )
         return self.list_accounts()
+
+    def get_account_by_name(self, name: str) -> dict[str, Any] | None:
+        clean_name = normalize_text(name)
+        if not clean_name:
+            return None
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT id, name, password_hash FROM accounts WHERE name = ?",
+                (clean_name,),
+            ).fetchone()
+        return dict(row) if row is not None else None
+
+    def verify_account_credentials(self, name: str, password: str) -> dict[str, Any] | None:
+        account = self.get_account_by_name(name)
+        if account is None:
+            return None
+        if not self.verify_password_hash(str(account.get("password_hash", "")), password):
+            return None
+        return account
+
+    def change_account_password(self, account_id: int, old_password: str, new_password: str) -> None:
+        account_id = int(account_id)
+        clean_new = (new_password or "").strip()
+        if not clean_new:
+            raise ServiceError("新密码不能为空")
+        if len(clean_new) < 4:
+            raise ServiceError("新密码至少需要 4 位")
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT id, password_hash FROM accounts WHERE id = ?", (account_id,),
+            ).fetchone()
+            if row is None:
+                raise NotFoundError("账号不存在")
+            if not self.verify_password_hash(str(row["password_hash"] or ""), old_password):
+                raise ServiceError("原密码不正确")
+            conn.execute(
+                "UPDATE accounts SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (self.build_password_hash(clean_new), account_id),
+            )
+
+    def reset_account_password(self, account_id: int, new_password: str) -> None:
+        """管理员直接重置任意账号密码，不需旧密码。"""
+        account_id = int(account_id)
+        clean_new = (new_password or "").strip()
+        if not clean_new:
+            raise ServiceError("新密码不能为空")
+        if len(clean_new) < 4:
+            raise ServiceError("新密码至少需要 4 位")
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT id, name FROM accounts WHERE id = ?", (account_id,),
+            ).fetchone()
+            if row is None:
+                raise NotFoundError("账号不存在")
+            if normalize_text(row["name"]) == normalize_text(DEFAULT_ACCOUNT_NAME):
+                raise ServiceError("不能重置管理员账号的密码，请使用改密功能")
+            conn.execute(
+                "UPDATE accounts SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (self.build_password_hash(clean_new), account_id),
+            )
 
     def _ensure_default_decks_for_account(self, conn: sqlite3.Connection, account_id: int) -> list[str]:
         created: list[str] = []
@@ -1888,7 +1985,6 @@ class CardRepository:
                         "ON CONFLICT(section_key, group_key) DO UPDATE SET sort_order = excluded.sort_order",
                         (section_key, group_key, sort_order),
                     )
-        self.ensure_default_decks()
         return {
             "importedCards": imported_cards,
             "skippedCards": skipped_cards,

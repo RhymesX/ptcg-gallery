@@ -50,5 +50,6 @@ data/**/*.json
 *.iml
 # 压缩包
 *.zip
-# Java 无关文件
-src/
+# Claude Code 项目辅助文件（不上传服务器）
+CLAUDE.md
+.claude/

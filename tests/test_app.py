@@ -50,7 +50,8 @@ class PtcgGalleryAppTests(unittest.TestCase):
         )
         self.client = self.app.test_client()
         with self.client.session_transaction() as session:
-            session["authed"] = True
+            session["account_id"] = 1
+            session["account_name"] = "RhymesX"
 
     def tearDown(self):
         self.temp_dir.cleanup()
@@ -1271,42 +1272,128 @@ class PtcgGalleryAppTests(unittest.TestCase):
 
         self.assertEqual(refreshed_group_keys, moved_group_keys)
 
-    def test_accounts_isolate_inventory_and_decks(self):
-        accounts_response = self.client.get("/api/accounts")
-        self.assertEqual(accounts_response.status_code, 200)
-        accounts_payload = accounts_response.get_json()
-        self.assertEqual(accounts_payload["current"]["name"], "RhymesX")
-        self.assertEqual(len(accounts_payload["items"]), 1)
+    def test_login_account_is_merged_and_admin_maps_to_rhymesx(self):
+        with self.client.session_transaction() as session:
+            session.clear()
+
+        unauth_response = self.client.get("/api/summary")
+        self.assertEqual(unauth_response.status_code, 401)
+
+        login_response = self.client.post(
+            "/login",
+            data={"username": "Flareon", "password": "mushroom"},
+            follow_redirects=False,
+        )
+        self.assertEqual(login_response.status_code, 302)
+
+        account_payload = self.client.get("/api/accounts").get_json()
+        self.assertEqual(account_payload["current"]["name"], "RhymesX")
 
         card_id = self._find_card_id(self.client, "CSM1aC-002", "小火龙")
-        default_card = self.client.get(f"/api/cards/{card_id}").get_json()
-        self.assertEqual(default_card["freeQuantity"], 2)
+        card_payload = self.client.get(f"/api/cards/{card_id}").get_json()
+        self.assertEqual(card_payload["freeQuantity"], 2)
 
-        create_response = self.client.post("/api/accounts", json={"name": "Alt"})
-        self.assertEqual(create_response.status_code, 201)
-        self.assertEqual(create_response.get_json()["current"]["name"], "Alt")
+    def test_register_and_change_password(self):
+        """注册新账号后不能直接用旧会话访问，改密后能用新密码登录。"""
+        # 当前是 RhymesX (id=1)
+        register_response = self.client.post(
+            "/api/accounts",
+            json={"name": "TestUser", "password": "test1234"},
+        )
+        self.assertEqual(register_response.status_code, 201)
+        items = register_response.get_json()["items"]
+        self.assertTrue(any(item["name"] == "TestUser" for item in items))
 
-        alt_summary = self.client.get("/api/summary").get_json()
-        self.assertEqual(alt_summary["freeCount"], 0)
-        self.assertEqual(alt_summary["inDeckCount"], 0)
-        self.assertEqual(alt_summary["deckCount"], 4)
+        # 修改当前账号密码
+        change_response = self.client.put(
+            "/api/accounts/password",
+            json={"oldPassword": "mushroom", "newPassword": "newpass5678"},
+        )
+        self.assertEqual(change_response.status_code, 200)
+        self.assertTrue(change_response.get_json()["ok"])
 
-        alt_card = self.client.get(f"/api/cards/{card_id}").get_json()
-        self.assertEqual(alt_card["freeQuantity"], 0)
-        self.client.put(f"/api/cards/{card_id}/free-quantity", json={"quantity": 7})
-        self.assertEqual(self.client.get(f"/api/cards/{card_id}").get_json()["freeQuantity"], 7)
+        # 旧密码不能再登录
+        with self.client.session_transaction() as session:
+            session.clear()
+        bad_login = self.client.post(
+            "/login",
+            data={"username": "RhymesX", "password": "mushroom"},
+            follow_redirects=False,
+        )
+        self.assertEqual(bad_login.status_code, 401)
 
-        accounts_payload = self.client.get("/api/accounts").get_json()
-        rhymes_id = next(item["id"] for item in accounts_payload["items"] if item["name"] == "RhymesX")
-        alt_id = next(item["id"] for item in accounts_payload["items"] if item["name"] == "Alt")
-        switch_response = self.client.put("/api/accounts/current", json={"accountId": rhymes_id})
-        self.assertEqual(switch_response.status_code, 200)
-        self.assertEqual(switch_response.get_json()["current"]["name"], "RhymesX")
-        self.assertEqual(self.client.get(f"/api/cards/{card_id}").get_json()["freeQuantity"], 2)
+        # 新密码可以登录
+        good_login = self.client.post(
+            "/login",
+            data={"username": "RhymesX", "password": "newpass5678"},
+            follow_redirects=False,
+        )
+        self.assertEqual(good_login.status_code, 302)
 
-        delete_response = self.client.delete(f"/api/accounts/{alt_id}")
-        self.assertEqual(delete_response.status_code, 200)
-        self.assertEqual([item["name"] for item in delete_response.get_json()["items"]], ["RhymesX"])
+        # 新注册账号也能登录
+        with self.client.session_transaction() as session:
+            session.clear()
+        testuser_login = self.client.post(
+            "/login",
+            data={"username": "TestUser", "password": "test1234"},
+            follow_redirects=False,
+        )
+        self.assertEqual(testuser_login.status_code, 302)
+
+    def test_admin_can_reset_regular_account_password(self):
+        """管理员（Flareon 登录）可重置普通账号密码；普通用户不可调用。"""
+        # 注册一个普通账号
+        self.client.post("/api/accounts", json={"name": "Peon", "password": "peonpass"})
+
+        # 当前 session 是 account_id=1, account_name=RhymesX（非管理员 session）
+        # 普通用户调用 admin reset → 403
+        reset_response = self.client.put(
+            "/api/accounts/2/password",
+            json={"newPassword": "hacked"},
+        )
+        self.assertEqual(reset_response.status_code, 403)
+
+        # 以管理员身份登录
+        with self.client.session_transaction() as session:
+            session.clear()
+        admin_login = self.client.post(
+            "/login",
+            data={"username": "Flareon", "password": "mushroom"},
+            follow_redirects=False,
+        )
+        self.assertEqual(admin_login.status_code, 302)
+
+        # 验证 isAdmin
+        account_payload = self.client.get("/api/accounts").get_json()
+        self.assertTrue(account_payload["isAdmin"])
+
+        # 管理员不能重置 RhymesX（自己）
+        bad_reset = self.client.put(
+            "/api/accounts/1/password",
+            json={"newPassword": "bad1234"},
+        )
+        self.assertNotEqual(bad_reset.status_code, 200)
+
+        # 管理员重置 Peon 的密码
+        good_reset = self.client.put(
+            "/api/accounts/2/password",
+            json={"newPassword": "rescue999"},
+        )
+        self.assertEqual(good_reset.status_code, 200)
+
+        # Peon 旧密码不能登录
+        with self.client.session_transaction() as session:
+            session.clear()
+        self.assertEqual(
+            self.client.post("/login", data={"username": "Peon", "password": "peonpass"}, follow_redirects=False).status_code,
+            401,
+        )
+
+        # Peon 新密码可以登录
+        self.assertEqual(
+            self.client.post("/login", data={"username": "Peon", "password": "rescue999"}, follow_redirects=False).status_code,
+            302,
+        )
 
 
 if __name__ == "__main__":

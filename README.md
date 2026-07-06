@@ -290,6 +290,7 @@ ptcgGalleryWeb/
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
+| GET | `/login` | 登录页面 |
 | GET | `/` | 首页 |
 | GET | `/holdings` | 总持有页面 |
 | GET | `/inventory-table` | 库存表格页面 |
@@ -301,6 +302,10 @@ ptcgGalleryWeb/
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
+| GET | `/api/accounts` | 获取账号列表 |
+| POST | `/api/accounts` | 新建账号 |
+| PUT | `/api/accounts/current` | 切换当前账号 |
+| DELETE | `/api/accounts/<account_id>` | 删除账号 |
 | GET | `/api/summary` | 获取统计信息 |
 | GET | `/api/search?q=...` | 搜索卡牌 |
 | GET | `/api/cards/<card_id>` | 获取单卡详情 |
@@ -308,6 +313,8 @@ ptcgGalleryWeb/
 | PUT | `/api/cards/<card_id>/free-quantity` | 直接设置空闲库存 |
 | POST | `/api/cards/<card_id>/add-to-deck` | 加入卡组 |
 | POST | `/api/cards/<card_id>/remove-from-deck` | 从卡组移除 |
+| POST | `/api/decks/<int:deck_id>/cards/<int:card_id>/quantity-action` | 卡组内单卡数量动作 |
+| POST | `/api/decks/<int:deck_id>/move-to-free` | 卡组全部转为空闲 |
 | GET | `/api/decks` | 获取卡组列表 |
 | POST | `/api/decks` | 新建卡组 |
 | GET | `/api/decks/<deck_id>` | 获取卡组详情 |
@@ -319,8 +326,13 @@ ptcgGalleryWeb/
 | PUT | `/api/inventory-table/group-quantities` | 批量更新同名组库存 |
 | POST | `/api/import/catalog-default` | 导入 `data/卡表.xlsx` |
 | POST | `/api/import/catalog-upload` | 上传 Excel 导入卡表 |
-| GET | `/api/export/state` | 导出 JSON 状态 |
-| POST | `/api/import/state` | 导入 JSON 状态 |
+| GET | `/api/export/state` | 导出账号 JSON 状态 |
+| POST | `/api/import/state` | 导入账号 JSON 状态 |
+| GET | `/api/export/inventory` | 导出库存 JSON |
+| POST | `/api/import/inventory` | 导入库存 JSON |
+| GET | `/api/images/lookup` | 卡图查找 |
+| GET | `/api/crawler/stats` | 爬虫状态 |
+| PUT | `/api/crawler/mode` | 设置爬虫模式 |
 
 ---
 
@@ -580,11 +592,8 @@ Set-Location "F:\ptcgGallery\ptcgGalleryWeb"
 
 ## 适合继续扩展的方向
 
-- 登录与多用户支持
-- 卡牌图片展示
 - 更细的筛选条件（属性、稀有度、赛制等）
 - 卡组导入 / 导出更丰富的格式
-- 云端部署与远程访问
 - 操作日志、备份策略、批量编辑
 
 ---

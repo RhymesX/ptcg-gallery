@@ -10,8 +10,8 @@ const state = {
     availableRegulations: [],
     selectedRegulations: [],
     considerSameNameRegulation: false,
-    accounts: [],
     currentAccount: null,
+    isAdmin: false,
     preferredDeckId: loadPreferredDeckId()
 };
 
@@ -34,11 +34,10 @@ const elements = {
     deckDescriptionInput: document.getElementById('deckDescriptionInput'),
     resetDeckBtn: document.getElementById('resetDeckBtn'),
     currentAccountName: document.getElementById('currentAccountName'),
-    accountSelect: document.getElementById('accountSelect'),
-    accountNameInput: document.getElementById('accountNameInput'),
-    switchAccountBtn: document.getElementById('switchAccountBtn'),
-    createAccountBtn: document.getElementById('createAccountBtn'),
-    deleteAccountBtn: document.getElementById('deleteAccountBtn'),
+    adminResetPanel: document.getElementById('adminResetPanel'),
+    adminResetAccountSelect: document.getElementById('adminResetAccountSelect'),
+    adminResetPasswordInput: document.getElementById('adminResetPasswordInput'),
+    adminResetBtn: document.getElementById('adminResetBtn'),
     accountStatus: document.getElementById('accountStatus'),
     importDefaultCatalogBtn: document.getElementById('importDefaultCatalogBtn'),
     catalogUploadInput: document.getElementById('catalogUploadInput'),
@@ -204,20 +203,21 @@ function renderSummary(summary) {
 }
 
 function renderAccounts(payload) {
-    state.accounts = payload.items || [];
-    state.currentAccount = payload.current || state.accounts.find((account) => account.isCurrent) || null;
+    const current = payload?.current;
+    state.isAdmin = Boolean(payload?.isAdmin);
+    state.currentAccount = current && typeof current === 'object' ? current : null;
     if (elements.currentAccountName) {
-        elements.currentAccountName.textContent = state.currentAccount?.name || '-';
+        elements.currentAccountName.textContent = (state.currentAccount?.name || '-') + (state.isAdmin ? ' (管理员)' : '');
     }
-    if (elements.accountSelect) {
-        elements.accountSelect.innerHTML = state.accounts.map((account) => `
-            <option value="${account.id}" ${account.id === state.currentAccount?.id ? 'selected' : ''}>
-                ${escapeHtml(account.name)}（${Number(account.ownedCount ?? ((account.freeCount || 0) + (account.inDeckCount || 0)))} 张 / ${Number(account.deckCount || 0)} 组）
-            </option>
-        `).join('');
+    if (elements.adminResetPanel) {
+        elements.adminResetPanel.style.display = state.isAdmin ? '' : 'none';
     }
-    if (elements.deleteAccountBtn) {
-        elements.deleteAccountBtn.disabled = state.accounts.length <= 1;
+    if (elements.adminResetAccountSelect) {
+        const items = payload?.items || [];
+        elements.adminResetAccountSelect.innerHTML = items
+            .filter(item => String(item.name) !== 'RhymesX')
+            .map(item => `<option value="${item.id}">${escapeHtml(item.name)}</option>`)
+            .join('');
     }
 }
 
@@ -227,73 +227,95 @@ async function loadAccounts() {
     return payload;
 }
 
-async function refreshAccountScopedData() {
-    state.selectedCardId = null;
-    state.selectedResultId = null;
-    state.preferredDeckId = null;
-    try {
-        window.localStorage.removeItem(LAST_USED_DECK_STORAGE_KEY);
-    } catch (_) {
-        // ignore storage failures
-    }
-    await Promise.all([loadAccounts(), loadSummary(), loadDecks(false), loadSearchOptions()]);
-    await refreshSearch(false);
-    elements.cardDetail.innerHTML = EMPTY_DETAIL_HTML;
-}
+// ── 改密弹窗 ───────────────────────────────────────────
 
-async function switchToSelectedAccount() {
-    const accountId = Number(elements.accountSelect?.value || 0);
-    if (!accountId || accountId === state.currentAccount?.id) {
-        return;
-    }
-    try {
-        const payload = await api('/api/accounts/current', {
-            method: 'PUT',
-            body: JSON.stringify({ accountId })
-        });
-        renderAccounts(payload);
-        await refreshAccountScopedData();
-        setStatus(elements.accountStatus, `已切换到账号：${state.currentAccount?.name || '-'}`, 'success');
-    } catch (error) {
-        setStatus(elements.accountStatus, error.message, 'warning');
-    }
-}
+(function initChangePwdModal() {
+    const overlay = document.getElementById('changePwdOverlay');
+    const trigger = document.getElementById('changePwdTrigger');
+    const cancelBtn = document.getElementById('changePwdCancel');
+    const confirmBtn = document.getElementById('changePwdConfirm');
+    const oldInput = document.getElementById('changePwdOld');
+    const newInput = document.getElementById('changePwdNew');
+    const statusEl = document.getElementById('changePwdStatus');
 
-async function createAccount() {
-    const name = elements.accountNameInput?.value.trim() || '';
-    if (!name) {
-        setStatus(elements.accountStatus, '请输入账号名称。', 'warning');
-        return;
+    function open() {
+        if (oldInput) oldInput.value = '';
+        if (newInput) newInput.value = '';
+        if (statusEl) statusEl.textContent = '';
+        if (overlay) overlay.style.display = '';
     }
-    try {
-        const payload = await api('/api/accounts', {
-            method: 'POST',
-            body: JSON.stringify({ name })
-        });
-        if (elements.accountNameInput) {
-            elements.accountNameInput.value = '';
+    function close() {
+        if (overlay) overlay.style.display = 'none';
+    }
+
+    if (trigger) trigger.addEventListener('click', open);
+    if (cancelBtn) cancelBtn.addEventListener('click', close);
+    if (overlay) overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+
+    async function submit() {
+        const oldPassword = (oldInput?.value || '').trim();
+        const newPassword = (newInput?.value || '').trim();
+        if (!oldPassword || !newPassword) {
+            if (statusEl) statusEl.textContent = '原密码和新密码均不能为空';
+            return;
         }
-        renderAccounts(payload);
-        await refreshAccountScopedData();
-        setStatus(elements.accountStatus, `已新增并切换到账号：${state.currentAccount?.name || name}`, 'success');
-    } catch (error) {
-        setStatus(elements.accountStatus, error.message, 'warning');
+        if (newPassword.length < 4) {
+            if (statusEl) statusEl.textContent = '新密码至少需要 4 位';
+            return;
+        }
+        try {
+            await api('/api/accounts/password', {
+                method: 'PUT',
+                body: JSON.stringify({ oldPassword, newPassword })
+            });
+            if (statusEl) { statusEl.style.color = 'var(--success,#2e7d32)'; statusEl.textContent = '密码修改成功'; }
+            setTimeout(close, 1200);
+        } catch (error) {
+            if (statusEl) { statusEl.style.color = 'var(--danger)'; statusEl.textContent = error.message; }
+        }
     }
-}
 
-async function deleteCurrentAccount() {
-    const account = state.currentAccount;
-    if (!account) {
+    if (confirmBtn) confirmBtn.addEventListener('click', submit);
+    if (newInput) newInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); submit(); } });
+})();
+
+// ── 登出 ───────────────────────────────────────────────
+
+(function initLogout() {
+    const btn = document.getElementById('logoutBtn');
+    if (!btn) return;
+    btn.addEventListener('click', () => {
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = '/logout';
+        document.body.appendChild(form);
+        form.submit();
+    });
+})();
+
+async function adminResetPassword() {
+    const select = elements.adminResetAccountSelect;
+    const accountId = Number(select?.value || 0);
+    if (!accountId) {
+        setStatus(elements.accountStatus, '请选择要重置的目标账号。', 'warning');
         return;
     }
-    if (!confirm(`确认删除账号“${account.name}”？这个账号下的库存和卡组会一起删除，卡表目录不会删除。`)) {
+    const newPassword = (elements.adminResetPasswordInput?.value || '').trim();
+    if (!newPassword || newPassword.length < 4) {
+        setStatus(elements.accountStatus, '新密码至少需要 4 位。', 'warning');
+        return;
+    }
+    const targetName = select?.options[select.selectedIndex]?.textContent || accountId;
+    if (!confirm(`确认重置账号“${targetName}”的密码为“${newPassword}”？`)) {
         return;
     }
     try {
-        const payload = await api(`/api/accounts/${account.id}`, { method: 'DELETE' });
-        renderAccounts(payload);
-        await refreshAccountScopedData();
-        setStatus(elements.accountStatus, `已删除账号：${account.name}`, 'success');
+        await api(`/api/accounts/${accountId}/password`, {
+            method: 'PUT',
+            body: JSON.stringify({ newPassword })
+        });
+        if (elements.adminResetPasswordInput) elements.adminResetPasswordInput.value = '';
+        setStatus(elements.accountStatus, `已重置账号“${targetName}”的密码。`, 'success');
     } catch (error) {
         setStatus(elements.accountStatus, error.message, 'warning');
     }
@@ -798,16 +820,6 @@ const debouncedSearch = debounce(() => refreshSearch(true), 200);
 
 elements.searchInput.addEventListener('input', debouncedSearch);
 elements.refreshSearchBtn.addEventListener('click', () => refreshSearch(true));
-elements.switchAccountBtn?.addEventListener('click', switchToSelectedAccount);
-elements.accountSelect?.addEventListener('change', switchToSelectedAccount);
-elements.createAccountBtn?.addEventListener('click', createAccount);
-elements.accountNameInput?.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter') {
-        event.preventDefault();
-        void createAccount();
-    }
-});
-elements.deleteAccountBtn?.addEventListener('click', deleteCurrentAccount);
 elements.searchSameNameToggle?.addEventListener('change', async () => {
     state.considerSameNameRegulation = Boolean(elements.searchSameNameToggle?.checked);
     try {
@@ -820,6 +832,18 @@ elements.searchSameNameToggle?.addEventListener('change', async () => {
     } catch (error) {
         setStatus(elements.searchStatus, error.message, 'warning');
     }
+});
+elements.registerAccountBtn?.addEventListener('click', registerAccount);
+elements.registerPasswordInput?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') { event.preventDefault(); void registerAccount(); }
+});
+elements.changePasswordBtn?.addEventListener('click', changePassword);
+elements.newPasswordInput?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') { event.preventDefault(); void changePassword(); }
+});
+elements.adminResetBtn?.addEventListener('click', adminResetPassword);
+elements.adminResetPasswordInput?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') { event.preventDefault(); void adminResetPassword(); }
 });
 
 if (elements.deckForm) {
@@ -901,6 +925,23 @@ elements.stateUploadInput.addEventListener('change', async (event) => {
         const result = await uploadFile('/api/import/state', file);
         setStatus(elements.deckStatus, `状态导入完成：导入 ${result.importedCards} 张卡牌，跳过 ${result.skippedCards} 张。${importBackupSuffix(result)}`, 'success');
         await Promise.all([loadDecks(false), loadSummary(), loadSearchOptions()]);
+        await refreshSearch(true);
+    } catch (error) {
+        setStatus(elements.deckStatus, error.message, 'warning');
+    } finally {
+        event.target.value = '';
+    }
+});
+
+elements.inventoryUploadInput.addEventListener('change', async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+        return;
+    }
+    try {
+        const result = await uploadFile('/api/import/inventory', file);
+        setStatus(elements.deckStatus, `库存导入完成：导入 ${result.importedCards} 张卡牌，跳过 ${result.skippedCards} 张。${importBackupSuffix(result)}`, 'success');
+        await Promise.all([loadSummary(), loadSearchOptions()]);
         await refreshSearch(true);
     } catch (error) {
         setStatus(elements.deckStatus, error.message, 'warning');

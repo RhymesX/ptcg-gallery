@@ -13,7 +13,11 @@
             <h1>ptcgGallery</h1>
             <p>本地运行、SQLite 落地、支持 Excel 卡表、库存与卡组管理。</p>
         </div>
-        <div class="stats" id="summaryCards"></div>
+        <div style="display:flex;align-items:center;gap:12px;">
+            <div class="stats" id="summaryCards"></div>
+            <button id="changePwdTrigger" type="button" class="secondary" style="white-space:nowrap;">改密</button>
+            <button id="logoutBtn" type="button" class="secondary" style="white-space:nowrap;">登出</button>
+        </div>
     </header>
 
     <main class="layout">
@@ -65,18 +69,16 @@
                     <h3 class="section-title">账号</h3>
                     <span class="section-count" id="currentAccountName">加载中</span>
                 </div>
-                <div class="account-switch-row">
-                    <select id="accountSelect" aria-label="切换账号"></select>
-                    <button id="switchAccountBtn" type="button" class="secondary">切换</button>
+
+                <div id="adminResetPanel" style="display:none;padding-top:4px;">
+                    <div class="account-create-row">
+                        <select id="adminResetAccountSelect" aria-label="目标账号"></select>
+                        <input id="adminResetPasswordInput" type="password" placeholder="新密码（≥4位）">
+                        <button id="adminResetBtn" type="button" class="danger">重置</button>
+                    </div>
                 </div>
-                <div class="account-create-row">
-                    <input id="accountNameInput" type="text" placeholder="新增账号名称">
-                    <button id="createAccountBtn" type="button">新增</button>
-                </div>
-                <div class="toolbar compact account-actions">
-                    <button id="deleteAccountBtn" type="button" class="danger">删除当前账号</button>
-                </div>
-                <p class="status-line" id="accountStatus">卡表目录共用，库存和卡组按账号独立保存。</p>
+
+                <p class="status-line" id="accountStatus">在登录页注册新账号，改密请点击右上角按钮。</p>
             </div>
 
             <div class="toolbar compact">
@@ -119,6 +121,25 @@
     </main>
 </div>
 
+<!-- 改密弹窗 -->
+<div id="changePwdOverlay" class="modal-overlay" style="display:none;">
+    <div class="modal-card" style="max-width:380px;">
+        <h3 style="margin:0 0 16px;">修改密码</h3>
+        <div id="changePwdStatus" style="color:var(--danger);margin-bottom:8px;font-size:13px;min-height:18px;"></div>
+        <div class="field" style="margin-bottom:12px;">
+            <label for="changePwdOld" style="display:block;font-size:13px;margin-bottom:4px;">原密码</label>
+            <input id="changePwdOld" type="password" placeholder="输入原密码" style="width:100%;box-sizing:border-box;">
+        </div>
+        <div class="field" style="margin-bottom:16px;">
+            <label for="changePwdNew" style="display:block;font-size:13px;margin-bottom:4px;">新密码（≥4位）</label>
+            <input id="changePwdNew" type="password" placeholder="输入新密码" style="width:100%;box-sizing:border-box;">
+        </div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;">
+            <button id="changePwdCancel" type="button" class="secondary">取消</button>
+            <button id="changePwdConfirm" type="button">确认修改</button>
+        </div>
+    </div>
+</div>
 
 <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>

@@ -57,19 +57,67 @@
         <h1>ptcgGallery</h1>
         <p class="sub">请输入用户名和密码以继续</p>
 
-        <div class="login-error">{{ error or '' }}</div>
+        <div class="login-error" id="loginError">{{ error or '' }}</div>
 
-        <form method="post" action="/login">
+        <form method="post" action="/login" autocomplete="off">
             <div class="field">
                 <label for="username">用户名</label>
-                <input id="username" name="username" type="text" placeholder="输入用户名" required autofocus>
+                <input id="username" name="username" type="text" placeholder="输入用户名" required autofocus autocomplete="off">
             </div>
             <div class="field">
                 <label for="password">密码</label>
-                <input id="password" name="password" type="password" placeholder="输入密码" required>
+                <input id="password" name="password" type="password" placeholder="输入密码" required autocomplete="new-password">
             </div>
             <button type="submit">登 录</button>
         </form>
+
+        <hr style="margin:24px 0;border-color:var(--border)">
+        <p style="font-size:13px;color:var(--muted);margin-bottom:16px;">还没有账号？请在下方注册：</p>
+        <div id="registerStatus" style="color:var(--danger);margin-bottom:8px;font-size:13px;min-height:18px;"></div>
+        <div class="field">
+            <label for="regName">新用户名</label>
+            <input id="regName" type="text" placeholder="输入新用户名" autocomplete="off">
+        </div>
+        <div class="field">
+            <label for="regPwd">新密码（≥4位）</label>
+            <input id="regPwd" type="password" placeholder="输入新密码" autocomplete="new-password">
+        </div>
+        <button id="registerBtn" type="button">注 册</button>
     </div>
+
+    <script>
+    document.getElementById('registerBtn').addEventListener('click', async () => {
+        const name = document.getElementById('regName').value.trim();
+        const password = document.getElementById('regPwd').value.trim();
+        const statusEl = document.getElementById('registerStatus');
+        const errorEl = document.getElementById('loginError');
+        if (!name) { statusEl.textContent = '请输入用户名'; return; }
+        if (!password || password.length < 4) { statusEl.textContent = '密码至少需要 4 位'; return; }
+        try {
+            const resp = await fetch('/api/accounts', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({name, password})
+            });
+            if (!resp.ok) {
+                const err = await resp.json().catch(() => ({}));
+                statusEl.textContent = err.error || '注册失败';
+                return;
+            }
+            statusEl.style.color = 'var(--success,#2e7d32)';
+            statusEl.textContent = '注册成功，正在登录...';
+            // 注册成功后自动登录
+            document.getElementById('username').value = name;
+            document.getElementById('password').value = password;
+            errorEl.textContent = '';
+            document.querySelector('form[action="/login"]').submit();
+        } catch (e) {
+            statusEl.textContent = '网络错误，请重试';
+        }
+    });
+    document.getElementById('regPwd').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); document.getElementById('registerBtn').click(); }
+    });
+    </script>
 </body>
 </html>
