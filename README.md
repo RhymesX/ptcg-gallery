@@ -212,8 +212,6 @@ ptcgGalleryWeb/
 └─ README.md                   项目说明
 ```
 
-> `src/Main.java` 目前是 IDE 生成的示例文件，与网站主逻辑无关。
-
 ---
 
 ## 网站页面说明
@@ -248,12 +246,13 @@ ptcgGalleryWeb/
 
 主要功能：
 
-- 查看卡组基本信息
-- 显示卡组总数、主牌数量、备卡数量
-- 按“宝可梦 / 能量 / 物品 / 支援者 / 竞技场 / 宝可梦道具 / 备卡”分类展示卡组内容
-- 每条卡以单行展示编号、名称、稀有度、卡组内数量
-- 可直接为卡组中的单卡设置备卡数量，备卡会单独归到末尾的“备卡”分区
-- 可单独设置基础能量数量，并持久化到卡组状态中
+- 查看卡组基本信息，显示卡组总数与主牌数量
+- 按”宝可梦 / 能量 / 物品 / 支援者 / 竞技场 / 宝可梦道具 / 备卡”分类展示
+- 每条卡展示编号、名称、稀有度，右侧可设目标数量快速调整
+- 备卡可一键”转为主卡组”（backup-to-main）
+- 支持”全部转为空闲”一键清空卡组
+- 可单独设置 8 种基础能量数量，持久化到卡组状态
+- 同名组和分区可拖拽排序
 
 当前基础能量固定支持：
 
@@ -302,75 +301,86 @@ ptcgGalleryWeb/
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| GET | `/api/accounts` | 获取账号列表 |
-| POST | `/api/accounts` | 新建账号 |
-| PUT | `/api/accounts/current` | 切换当前账号 |
-| DELETE | `/api/accounts/<account_id>` | 删除账号 |
 | GET | `/api/summary` | 获取统计信息 |
+| GET | `/api/search/options` | 获取搜索选项（赛制列表、偏好） |
+| PUT | `/api/search/preferences` | 保存搜索偏好 |
 | GET | `/api/search?q=...` | 搜索卡牌 |
 | GET | `/api/cards/<card_id>` | 获取单卡详情 |
-| POST | `/api/cards/<card_id>/free-adjust` | 调整空闲库存 |
+| POST | `/api/cards/<card_id>/free-adjust` | 调整空闲库存（+/- delta） |
 | PUT | `/api/cards/<card_id>/free-quantity` | 直接设置空闲库存 |
 | POST | `/api/cards/<card_id>/add-to-deck` | 加入卡组 |
 | POST | `/api/cards/<card_id>/remove-from-deck` | 从卡组移除 |
-| POST | `/api/decks/<int:deck_id>/cards/<int:card_id>/quantity-action` | 卡组内单卡数量动作 |
-| POST | `/api/decks/<int:deck_id>/move-to-free` | 卡组全部转为空闲 |
+| POST | `/api/cards/<card_id>/adjust-total` | 调整总持有量 |
+| DELETE | `/api/cards/<card_id>` | 删除卡牌及所有库存 |
+| GET | `/api/accounts` | 获取账号列表 |
+| POST | `/api/accounts` | 注册新账号 |
+| PUT | `/api/accounts/password` | 修改当前账号密码 |
+| PUT | `/api/accounts/<id>/password` | 管理员重置任意账号密码 |
 | GET | `/api/decks` | 获取卡组列表 |
 | POST | `/api/decks` | 新建卡组 |
+| POST | `/api/decks/reorder` | 拖拽调整卡组顺序 |
 | GET | `/api/decks/<deck_id>` | 获取卡组详情 |
+| PUT | `/api/decks/<deck_id>` | 更新卡组名称/描述/颜色 |
+| DELETE | `/api/decks/<deck_id>` | 删除卡组（卡回空闲） |
+| PUT | `/api/decks/<deck_id>/basic-energies` | 设置卡组基础能量数量 |
 | PUT | `/api/decks/<deck_id>/cards/<card_id>/backup-quantity` | 设置卡组内备卡数量 |
-| PUT | `/api/decks/<deck_id>/basic-energies` | 更新卡组基础能量数量 |
-| PUT | `/api/decks/<deck_id>` | 更新卡组 |
-| DELETE | `/api/decks/<deck_id>` | 删除卡组 |
+| POST | `/api/decks/<deck_id>/cards/<card_id>/quantity-action` | 卡组内单卡数量动作 |
+| POST | `/api/decks/<deck_id>/move-to-free` | 卡组内全部卡转为空闲 |
+| PUT | `/api/decks/<deck_id>/group-order` | 卡组内同名组排序 |
+| PUT | `/api/decks/<deck_id>/section-order` | 卡组内分区排序 |
 | GET | `/api/holdings` | 获取总持有报表 |
+| PUT | `/api/holdings/group-order` | 调整持有页同名组排序 |
 | PUT | `/api/inventory-table/group-quantities` | 批量更新同名组库存 |
+| PUT | `/api/inventory-table/group-order` | 调整库存表格同名组排序 |
 | POST | `/api/import/catalog-default` | 导入 `data/卡表.xlsx` |
 | POST | `/api/import/catalog-upload` | 上传 Excel 导入卡表 |
-| GET | `/api/export/state` | 导出账号 JSON 状态 |
-| POST | `/api/import/state` | 导入账号 JSON 状态 |
-| GET | `/api/export/inventory` | 导出库存 JSON |
-| POST | `/api/import/inventory` | 导入库存 JSON |
+| GET | `/api/export/state` | 导出完整状态 JSON |
+| POST | `/api/import/state` | 导入完整状态 JSON |
+| GET | `/api/export/inventory` | 导出纯库存 JSON |
+| POST | `/api/import/inventory` | 导入纯库存 JSON |
 | GET | `/api/images/lookup` | 卡图查找 |
-| GET | `/api/crawler/stats` | 爬虫状态 |
+| GET | `/api/images/<cache_key>` | 获取缓存卡图 |
+| GET | `/api/images/user/<filename>` | 获取用户自定义卡图 |
+| GET | `/api/crawler/status` | 爬虫状态 |
 | PUT | `/api/crawler/mode` | 设置爬虫模式 |
 
 ---
 
 ## 数据模型说明
 
-项目当前使用 SQLite，主要有 5 张表：
+项目当前使用 SQLite，主要有以下表：
 
 ### `cards`
 
-存放卡表主数据，例如：
+存放卡表主数据，通过 `source_key`（商品编号-卡牌编号）唯一标识每张卡。
 
-- 商品名称 / 商品编号
-- 卡牌编号 / 卡牌名称
-- 类型 / 详细 / 特殊
-- 属性 / 稀有度 / 赛制
-- 备注
-- 首次导入时的初始数量
+### `accounts`
+
+存放账号信息，包含密码哈希（SHA-256 PBKDF2）。管理员账号固定为 "RhymesX"。
 
 ### `free_inventory`
 
-存放每张卡当前的**空闲库存**。
+存放每张卡在当前账号下的**空闲库存**（`account_id + card_id` 联合主键）。
 
 ### `decks`
 
-存放卡组信息：
-
-- 名称
-- 描述
-- 颜色
-- 创建时间 / 更新时间
+存放卡组信息（名称、描述、颜色、排序），每个账号独立拥有卡组。
 
 ### `deck_cards`
 
-存放卡组与卡牌的关联数量，以及其中有多少张被标记为备卡。
+存放卡组与卡牌的关联数量，以及备卡数量。
 
 ### `deck_basic_energies`
 
-存放每个卡组单独设置的基础能量数量。
+存放每个卡组单独设置的 8 种基础能量数量。
+
+### `holdings_group_orders` / `deck_section_orders`
+
+存放同名卡组和卡组分区的拖拽排序顺序。
+
+### `app_settings`
+
+存放应用级配置键值对。
 
 ---
 
@@ -555,14 +565,17 @@ http://127.0.0.1:8000
 
 - 在 `data/` 下生成或使用 `ptcg_gallery.db`
 - 如果数据库原本为空，会自动从 `data/卡表.xlsx` 初始化卡牌目录
-- 默认卡组会自动建立
+- 默认管理员账号 `RhymesX` 自动创建
+- 默认卡组（电友、龙柱、铝钢龙、多龙）自动建立
+
+启动后打开 `http://127.0.0.1:8000`，会先跳转到登录页。默认管理员账号通过环境变量 `PTCG_AUTH_USER` / `PTCG_AUTH_PASS` 配置，默认值为 `Flareon` / `mushroom`。管理员登录后实际使用的是 `RhymesX` 账号。新用户可在登录页下方直接注册。
 
 如果你只是想把项目跑起来，核心就是 4 步：
 
 1. 安装 Python 3.11+
 2. 安装依赖 `pip install -r requirements.txt`
 3. 运行 `run.py`
-4. 浏览器打开 `http://127.0.0.1:8000`
+4. 浏览器打开 `http://127.0.0.1:8000`，用管理员账号登录
 
 ---
 
@@ -572,12 +585,16 @@ http://127.0.0.1:8000
 
 - 默认卡组初始化
 - 编号/名称/PROMO 派生搜索
+- 赛制筛选与同名牌赛制联动
 - 总持有报表分类与分组
-- 库存表格批量修改
+- 库存表格批量修改与拖拽排序
 - 库存与卡组联动
 - 基础能量状态导出 / 导入回灌
-- 状态导出 / 导入回灌
+- 状态导出 / 导入回灌（含自动备份）
 - 删除卡组后库存回收
+- 卡组同名牌 4 张限制
+- 登录认证：未登录拦截、管理员映射、账号注册
+- 密码管理：修改密码、管理员重置、旧密码失效
 
 运行命令：
 
