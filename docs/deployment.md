@@ -149,16 +149,43 @@ cd /opt/ptcgGalleryWeb
 
 ### 5.6 拆库迁移上线步骤
 
-当代码已经包含“共享目录库 + 用户独立业务库”的完整实现后，可以用下面的步骤在服务器上执行正式拆库。
+> **适用版本**：本次提交（`fe0833c`，2026-07-07）引入了"共享目录库 + 用户独立业务库"架构。
+> 从单库升级到此版本时需要执行本节的迁移步骤。
+> **后续版本**：如果服务器已经完成拆库（即 `data/accounts/` 目录已存在且包含各用户 `.db` 文件），后续 `git pull` 更新代码时**不需要**再执行本节步骤，直接重启服务即可。
 
-先停服务，避免迁移期间仍有写入：
+#### 前置条件
+
+在服务器上执行迁移前，确保：
+
+- 代码已更新到包含拆库改动的版本（`git pull` 或手动上传）
+- 虚拟环境依赖已安装（`openpyxl` 是必需的）
+- 已确认服务器当前没有任何用户正在使用（通知维护窗口）
 
 ```bash
-systemctl stop ptcggallery
-systemctl status ptcggallery
+# 确认依赖
+cd /opt/ptcgGalleryWeb
+.venv/bin/pip install -r requirements.txt
+.venv/bin/python -c "import flask; import openpyxl; print('OK')"
 ```
 
-先做只读检查，生成一份迁移前报告：
+#### 步骤 1：停服并手动备份
+
+```bash
+# 停止服务
+sudo systemctl stop ptcggallery
+sudo systemctl status ptcggallery   # 确认已停止
+
+# 手动做一次额外备份（迁移脚本也会自动备份，这里再加一层保险）
+cd /opt/ptcgGalleryWeb
+mkdir -p data/backups
+cp data/ptcg_gallery.db "data/backups/manual-pre-migration-$(date +%Y%m%d_%H%M%S).db"
+cp data/search_preferences.json "data/backups/manual-pre-migration-search-$(date +%Y%m%d_%H%M%S).json" 2>/dev/null
+cp data/auth.json "data/backups/manual-pre-migration-auth-$(date +%Y%m%d_%H%M%S).json" 2>/dev/null
+```
+
+#### 步骤 2：只读检查
+
+先不做任何写操作，只检查迁移脚本能否正确读取当前数据：
 
 ```bash
 cd /opt/ptcgGalleryWeb
@@ -166,27 +193,95 @@ cd /opt/ptcgGalleryWeb
     --report-path /opt/ptcgGalleryWeb/data/backups/db-split-inspect.json
 ```
 
-确认输出里的 `accounts`、`legacy` 统计和目标路径无误后，再执行正式迁移：
+检查输出：
+
+- `accounts` 列表中的账号数量和名称与你预期一致
+- 每个账号的 `legacy` 统计（`freeInventory` 行数/总量、`decks` 数量、`deckCards` 行数/总量）与实际情况相符
+- 所有 `targetDbExists` 为 `false`
+- 脚本退出码为 0
+
+如果任何一项不对，**停止**，排查后再继续。
+
+#### 步骤 3：执行迁移
 
 ```bash
 cd /opt/ptcgGalleryWeb
 .venv/bin/python scripts/migrate_split_db.py --apply
 ```
 
-说明：
+关键检查点：
 
-1. 该脚本会先在 `data/backups/` 下自动备份 `ptcg_gallery.db`、`search_preferences.json`、`auth.json`，并写出迁移报告。
-2. 正式迁移会为每个账号生成 `data/accounts/{account_id}.db`。
-3. 如果目标账号库文件已经存在，脚本会默认停止，防止误覆盖。只有确认需要重建时才加 `--force`。
+- `"allAccountsVerified": true` —— 必须是 `true`，如果不是，**停止！**
+- 每个账号的 `"verificationOk": true`
+- `"backupDir"` 指向 `data/backups/db-split-XXXX/`，确认该目录存在且包含 `ptcg_gallery.db`
+- 脚本退出码为 0
 
-迁移完成后，先检查生成的报告，再启动服务：
+#### 步骤 4：迁移后对账
 
 ```bash
-systemctl start ptcggallery
-systemctl status ptcggallery
+cd /opt/ptcgGalleryWeb
+
+# 确认账号库文件已生成
+ls -la data/accounts/
+
+# 快速检查每个用户库的表和数据
+.venv/bin/python scripts/verify_account_dbs.py
 ```
 
-如果迁移后发现问题，不要立即删除旧主库中的旧用户数据表，优先回滚代码并使用 `data/backups/` 下的备份文件恢复。
+检查点：
+
+- 每个账号有一个 `.db` 文件
+- 每个用户库有 8 张业务表（`free_inventory`、`decks`、`deck_cards`、`deck_basic_energies`、`deck_section_orders`、`holdings_group_orders`、`holdings_card_orders`、`user_settings`）
+- 数据量与步骤 2 检查报告中的 `legacy` 统计一致
+
+#### 步骤 5：启动服务并验证
+
+```bash
+sudo systemctl start ptcggallery
+sudo systemctl status ptcggallery   # 确认 active (running)
+
+# 查看启动日志，确认无异常
+journalctl -u ptcggallery -n 20
+```
+
+打开浏览器访问网站，逐项验证：
+
+- [ ] 管理员账号能正常登录
+- [ ] 首页库存统计数字正确
+- [ ] 持有卡牌列表正常展示，分组顺序正确
+- [ ] 卡组列表和卡组详情正常
+- [ ] 搜索功能正常
+- [ ] 创建新账号后，新旧账号数据隔离（库存、卡组、排序、偏好互不干扰）
+
+#### 步骤 6：清理旧数据（可选，建议等稳定运行一周后再做）
+
+迁移成功后，旧主库中的 `free_inventory`、`decks`、`deck_cards`、`deck_basic_energies`、`deck_section_orders`、`holdings_group_orders` 等旧表仍然保留。确认新架构稳定后，可以通过 SQLite 清理这些旧表以减小主库体积。**在此之前不要删除，它们是回滚的依据。**
+
+#### 回滚说明
+
+如果迁移后发现问题需要回滚：
+
+```bash
+# 1. 停止服务
+sudo systemctl stop ptcggallery
+
+# 2. 恢复旧代码（git checkout 到迁移前的 commit）
+
+# 3. 恢复主库（使用步骤 1 手动备份的文件）
+cd /opt/ptcgGalleryWeb
+cp data/backups/manual-pre-migration-XXXX.db data/ptcg_gallery.db
+
+# 4. 恢复搜索偏好
+cp data/backups/manual-pre-migration-search-XXXX.json data/search_preferences.json 2>/dev/null
+
+# 5. 删除新生成的账号库
+rm -f data/accounts/*.db
+
+# 6. 启动服务
+sudo systemctl start ptcggallery
+```
+
+> 迁移脚本自身也会在 `data/backups/db-split-XXXX/` 下保留一份备份，也可以用它来恢复。
 
 ---
 
