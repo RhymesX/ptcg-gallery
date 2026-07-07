@@ -670,6 +670,7 @@ class CardRepository:
                 raise NotFoundError("账号不存在")
             if normalize_text(row["name"]) == normalize_text(DEFAULT_ACCOUNT_NAME):
                 raise ServiceError("不能删除管理员账号")
+            conn.execute("DELETE FROM invite_codes WHERE used_by_account_id = ?", (account_id,))
             conn.execute("DELETE FROM accounts WHERE id = ?", (account_id,))
         return self.list_accounts()
 
