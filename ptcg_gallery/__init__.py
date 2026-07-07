@@ -36,6 +36,35 @@ def _load_session_account(repository: CardRepository) -> dict[str, Any] | None:
     return account
 
 
+def _load_auth_config(data_dir: str, test_config: dict[str, Any] | None = None) -> dict[str, str]:
+    """从 data/auth.json 读取管理员凭据。测试模式下可通过 test_config 注入。"""
+    if test_config:
+        return {
+            "admin_user": test_config.get("AUTH_USERNAME", ""),
+            "admin_pass": test_config.get("AUTH_PASSWORD", ""),
+            "init_admin_pass": test_config.get("INIT_ADMIN_PASS", test_config.get("AUTH_PASSWORD", "")),
+        }
+    auth_file = Path(data_dir) / "auth.json"
+    if not auth_file.exists():
+        raise SystemExit(
+            f"缺少认证配置文件 {auth_file}\n"
+            f"请创建该文件，内容格式：\n"
+            f'  {{"admin_user": "你的管理员用户名", "admin_pass": "你的管理员密码", "init_admin_pass": "RhymesX初始密码"}}\n'
+        )
+    try:
+        data = json.loads(auth_file.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"认证配置文件 {auth_file} 不是有效的 JSON: {exc}") from exc
+    admin_user = str(data.get("admin_user", "")).strip()
+    admin_pass = str(data.get("admin_pass", "")).strip()
+    init_admin_pass = str(data.get("init_admin_pass", "")).strip()
+    if not admin_user or not admin_pass:
+        raise SystemExit(f"认证配置文件 {auth_file} 缺少 admin_user 或 admin_pass 字段")
+    if not init_admin_pass:
+        raise SystemExit(f"认证配置文件 {auth_file} 缺少 init_admin_pass 字段")
+    return {"admin_user": admin_user, "admin_pass": admin_pass, "init_admin_pass": init_admin_pass}
+
+
 def create_app(test_config: dict[str, Any] | None = None) -> Flask:
     root_dir = Path((test_config or {}).get("ROOT_DIR") or Path(__file__).resolve().parent.parent)
     paths: AppPaths = build_paths(root_dir)
@@ -54,9 +83,10 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
         TESTING=False,
         SECRET_KEY=os.environ.get("PTCG_SECRET_KEY", os.urandom(24).hex()),
     )
-    # 登录凭证（默认 admin / pika2024，可通过环境变量覆盖）
-    app.config["AUTH_USERNAME"] = os.environ.get("PTCG_AUTH_USER", "Flareon")
-    app.config["AUTH_PASSWORD"] = os.environ.get("PTCG_AUTH_PASS", "mushroom")
+    auth = _load_auth_config(str(paths.data_dir), test_config)
+    app.config["AUTH_USERNAME"] = auth["admin_user"]
+    app.config["AUTH_PASSWORD"] = auth["admin_pass"]
+    app.config["INIT_ADMIN_PASS"] = auth["init_admin_pass"]
     if test_config:
         app.config.update(test_config)
         if test_config.get("DATABASE"):
@@ -67,6 +97,7 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
 
     database_exists = Path(app.config["DATABASE"]).exists()
     repository = CardRepository(app.config["DATABASE"])
+    repository.set_init_admin_pass(app.config["INIT_ADMIN_PASS"])
     if not database_exists:
         repository.ensure_default_decks()
     repository.ensure_default_catalog(app.config["DEFAULT_EXCEL_PATH"])
@@ -181,15 +212,27 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
 
     @app.post("/api/accounts")
     def register_account():
-        """注册新账号（任意已登录用户均可注册）。"""
+        """注册新账号（可在登录页未登录状态下调用，需邀请码）。"""
         payload = request.get_json(force=True, silent=True) or {}
         name = (payload.get("name") or "").strip()
         password = (payload.get("password") or "").strip()
+        invite_code = (payload.get("inviteCode") or "").strip()
         if not name:
             return jsonify({"error": "账号名称不能为空"}), 400
         if not password or len(password) < 4:
             return jsonify({"error": "密码至少需要 4 位"}), 400
+        if not invite_code:
+            return jsonify({"error": "需要邀请码才能注册"}), 400
         result = repository.create_account(name, password)
+        # 获取刚创建的账号 ID
+        account = repository.get_account_by_name(name)
+        if account is None:
+            return jsonify({"error": "注册失败"}), 500
+        if not repository.validate_and_consume_invite_code(invite_code, int(account["id"])):
+            # 邀请码无效，直接删除刚创建的账号
+            with repository.connect() as conn:
+                conn.execute("DELETE FROM accounts WHERE id = ?", (int(account["id"]),))
+            return jsonify({"error": "邀请码无效或已过期"}), 400
         return jsonify(result), 201
 
     @app.put("/api/accounts/password")
@@ -219,6 +262,30 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
             return jsonify({"error": "新密码至少需要 4 位"}), 400
         repository.reset_account_password(account_id, new_password)
         return jsonify({"ok": True})
+
+    @app.delete("/api/accounts/<int:account_id>")
+    def admin_delete_account(account_id: int):
+        """管理员删除指定账号及其所有数据。"""
+        if not session.get("is_admin"):
+            return jsonify({"error": "无权操作"}), 403
+        repository.delete_account(account_id)
+        return jsonify({"ok": True})
+
+    # ── 邀请码管理（仅管理员） ──
+
+    @app.get("/api/invite-codes")
+    def list_invite_codes():
+        """管理员查看所有有效邀请码。"""
+        if not session.get("is_admin"):
+            return jsonify({"error": "无权操作"}), 403
+        return jsonify(repository.list_invite_codes())
+
+    @app.post("/api/invite-codes")
+    def generate_invite_code():
+        """管理员生成新邀请码。"""
+        if not session.get("is_admin"):
+            return jsonify({"error": "无权操作"}), 403
+        return jsonify(repository.generate_invite_code())
 
     @app.get("/api/holdings")
     def holdings():
@@ -512,6 +579,8 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
 
     @app.get("/api/crawler/status")
     def crawler_status():
+        if not session.get("is_admin"):
+            return jsonify({"error": "无权操作"}), 403
         if crawler is None:
             return jsonify({"running": False, "mode": "off", "downloadEnabled": False,
                            "reason": "未启动（测试模式）"})
@@ -521,6 +590,8 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
 
     @app.put("/api/crawler/mode")
     def crawler_set_mode():
+        if not session.get("is_admin"):
+            return jsonify({"error": "无权操作"}), 403
         if crawler is None:
             return jsonify({"ok": False, "error": "爬虫未启动"}), 400
         payload = request.get_json(force=True, silent=True) or {}

@@ -105,17 +105,41 @@ python3 -m venv .venv
 
 ### 5.3 上传数据文件
 
-数据库文件不在 git 仓库中（已加入 .gitignore），需要从本地上传：
+数据库文件和 `auth.json` 不在 git 仓库中（已加入 .gitignore），需要从本地上传或在服务器手动创建：
 
 ```bash
-# 在你的本地电脑 PowerShell 执行：
+# 在你的本地电脑 PowerShell 执行（上传已有的数据文件）：
 scp data/ptcg_gallery.db root@<服务器IP>:/opt/ptcgGalleryWeb/data/
 scp data/卡表.xlsx root@<服务器IP>:/opt/ptcgGalleryWeb/data/
+
+# 在服务器上创建 auth.json（见 5.4 认证配置）或者从本地上传：
+scp data/auth.json root@<服务器IP>:/opt/ptcgGalleryWeb/data/
 ```
 
-如果无法 SSH，可通过阿里云 Workbench → 文件管理上传。
+### 5.4 创建认证配置文件
 
-### 5.4 测试运行
+应用启动时会从 `data/auth.json` 读取管理员凭据，首次部署时必须手动创建。在服务器上执行：
+
+```bash
+sudo nano /opt/ptcgGalleryWeb/data/auth.json
+```
+
+写入以下内容（替换为实际的用户名和密码）：
+
+```json
+{
+  "admin_user": "你的管理员用户名",
+  "admin_pass": "你的管理员密码",
+  "init_admin_pass": "RhymesX初始密码"
+}
+```
+
+- **admin_user / admin_pass**：登录页使用的管理员用户名和密码
+- **init_admin_pass**：默认 RhymesX 账号的初始密码，仅在新数据库首次初始化时生效，之后可登录网页自行改密
+
+> 该文件和数据库文件一样已在 `.gitignore` 中排除，`git pull` 不会覆盖。
+
+### 5.5 测试运行
 
 ```bash
 cd /opt/ptcgGalleryWeb
@@ -143,9 +167,6 @@ ExecStart=/opt/ptcgGalleryWeb/.venv/bin/python run.py
 Restart=always
 RestartSec=5
 Environment=PYTHONUNBUFFERED=1
-# 登录用户名/密码（修改下面的值来改密码）
-Environment=PTCG_AUTH_USER=admin
-Environment=PTCG_AUTH_PASS=pika2024
 
 [Install]
 WantedBy=multi-user.target
@@ -208,12 +229,10 @@ systemctl reload nginx
 
 ### 修改登录密码
 
-编辑 `/etc/systemd/system/ptcggallery.service`，修改 `Environment=PTCG_AUTH_PASS=新密码`：
+登录后在网页右上角点击改密即可修改当前账号密码。管理员凭据也可直接编辑 `/opt/ptcgGalleryWeb/data/auth.json`，改完后重启服务：
 
 ```bash
-sudo nano /etc/systemd/system/ptcggallery.service
-# 改完后：
-sudo systemctl daemon-reload
+sudo nano /opt/ptcgGalleryWeb/data/auth.json
 sudo systemctl restart ptcggallery
 ```
 
@@ -268,7 +287,7 @@ sudo systemctl restart ptcggallery
 | HTML 模板 | 上传 + `sudo systemctl restart ptcggallery` |
 | CSS / JS | 上传新文件 + `sudo systemctl reload nginx` |
 | 新增 Python 依赖 | 上传 requirements.txt + `.venv/bin/pip install -r requirements.txt` + restart |
-| 改密码 | `sudo nano /etc/systemd/system/ptcggallery.service` → 修改 PTCG_AUTH_PASS → `daemon-reload` + restart |
+| 改密码 | 网页右上角改密按钮；或编辑 `data/auth.json` 后 `restart` |
 
 ### 查看日志
 
@@ -332,7 +351,7 @@ scp root@<IP>:/opt/backups/ptcg_gallery_*.db ./
 
 | 优先级 | 项目 | 说明 |
 |--------|------|------|
-| 🔴 必须 | Flask 登录 | 已内置，环境变量配置密码 |
+| 🔴 必须 | Flask 登录 | 已内置，通过 data/auth.json 配置凭据 |
 | 🔴 必须 | 定期备份 | 数据库丢了就没了 |
 | 🟡 推荐 | HTTPS | 有域名后配 Let's Encrypt |
 | 🟡 推荐 | 关 80 换 443 | HTTPS 后关闭 HTTP |

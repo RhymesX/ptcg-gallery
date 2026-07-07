@@ -283,6 +283,19 @@ CREATE INDEX IF NOT EXISTS idx_cards_name ON cards(card_name);
 CREATE INDEX IF NOT EXISTS idx_cards_regulation ON cards(regulation);
 CREATE INDEX IF NOT EXISTS idx_deck_cards_card_id ON deck_cards(card_id);
 CREATE INDEX IF NOT EXISTS idx_deck_cards_deck_id ON deck_cards(deck_id);
+
+CREATE TABLE IF NOT EXISTS invite_codes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code TEXT NOT NULL UNIQUE,
+    used_by_account_id INTEGER DEFAULT NULL,
+    used_at TEXT DEFAULT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    expires_at TEXT NOT NULL,
+    FOREIGN KEY(used_by_account_id) REFERENCES accounts(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_invite_codes_code ON invite_codes(code);
+CREATE INDEX IF NOT EXISTS idx_invite_codes_expires ON invite_codes(expires_at);
 """
 
 
@@ -291,8 +304,12 @@ class CardRepository:
 
     def __init__(self, db_path: str | os.PathLike[str]):
         self.db_path = str(db_path)
+        self._init_admin_pass = ""
         self.search_preferences_path = Path(self.db_path).resolve().parent / SEARCH_PREFERENCES_FILE_NAME
         self.initialize()
+
+    def set_init_admin_pass(self, password: str):
+        self._init_admin_pass = str(password or "")
 
     @contextmanager
     def connect(self):
@@ -354,7 +371,7 @@ class CardRepository:
             return
         conn.execute(
             "UPDATE accounts SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-            (self.build_password_hash("mushroom"), int(row["id"])),
+            (self.build_password_hash(self._init_admin_pass or ""), int(row["id"])),
         )
 
     @classmethod
@@ -651,6 +668,8 @@ class CardRepository:
             row = conn.execute("SELECT id, name FROM accounts WHERE id = ?", (account_id,)).fetchone()
             if row is None:
                 raise NotFoundError("账号不存在")
+            if normalize_text(row["name"]) == normalize_text(DEFAULT_ACCOUNT_NAME):
+                raise ServiceError("不能删除管理员账号")
             conn.execute("DELETE FROM accounts WHERE id = ?", (account_id,))
         return self.list_accounts()
 
@@ -713,6 +732,57 @@ class CardRepository:
                 "UPDATE accounts SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 (self.build_password_hash(clean_new), account_id),
             )
+
+    # ── 邀请码 ─────────────────────────────────────────────
+
+    def generate_invite_code(self) -> dict[str, Any]:
+        """管理员生成一个 24 小时有效的邀请码。"""
+        import uuid
+        code = str(uuid.uuid4())[:8].upper()
+        with self.connect() as conn:
+            conn.execute(
+                "INSERT INTO invite_codes(code, expires_at) VALUES (?, datetime('now', '+1 day'))",
+                (code,),
+            )
+        return self.list_invite_codes()
+
+    def list_invite_codes(self) -> dict[str, Any]:
+        """列出所有未使用的邀请码及其过期时间。"""
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, code, created_at, expires_at
+                FROM invite_codes
+                WHERE used_by_account_id IS NULL AND datetime(expires_at) > datetime('now')
+                ORDER BY created_at DESC
+                """
+            ).fetchall()
+        codes = [
+            {"id": row["id"], "code": row["code"], "createdAt": row["created_at"], "expiresAt": row["expires_at"]}
+            for row in rows
+        ]
+        return {"codes": codes}
+
+    def validate_and_consume_invite_code(self, code: str, account_id: int) -> bool:
+        """校验邀请码是否有效，有效则标记为已用。返回 True 表示成功。"""
+        clean_code = normalize_text(code).upper()
+        if not clean_code:
+            return False
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT id FROM invite_codes
+                WHERE code = ? AND used_by_account_id IS NULL AND datetime(expires_at) > datetime('now')
+                """,
+                (clean_code,),
+            ).fetchone()
+            if row is None:
+                return False
+            conn.execute(
+                "UPDATE invite_codes SET used_by_account_id = ?, used_at = datetime('now') WHERE id = ?",
+                (int(account_id), row["id"]),
+            )
+        return True
 
     def _ensure_default_decks_for_account(self, conn: sqlite3.Connection, account_id: int) -> list[str]:
         created: list[str] = []

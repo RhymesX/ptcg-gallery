@@ -46,6 +46,9 @@ class PtcgGalleryAppTests(unittest.TestCase):
                 "ROOT_DIR": str(self.root),
                 "DATABASE": str(self.db_path),
                 "DEFAULT_EXCEL_PATH": str(self.default_excel),
+                "AUTH_USERNAME": "test_admin",
+                "AUTH_PASSWORD": "test_pass",
+                "INIT_ADMIN_PASS": "test_pass",
             }
         )
         self.client = self.app.test_client()
@@ -159,6 +162,17 @@ class PtcgGalleryAppTests(unittest.TestCase):
         payload = client.get(f"/api/search?q={query}").get_json()
         item = next(item for item in payload["items"] if item["cardName"] == card_name)
         return item["id"]
+
+    def _generate_invite_code(self, client) -> str:
+        """以管理员身份生成邀请码并返回 code 字符串。"""
+        with client.session_transaction() as session:
+            session["account_id"] = 1
+            session["account_name"] = "RhymesX"
+            session["is_admin"] = True
+        data = client.post("/api/invite-codes").get_json()
+        codes = data.get("codes", [])
+        self.assertTrue(len(codes) > 0, "应至少有一个邀请码")
+        return codes[0]["code"]
 
     def test_exact_code_search_returns_multiple_cards(self):
         decks = self.client.get("/api/decks")
@@ -1281,7 +1295,7 @@ class PtcgGalleryAppTests(unittest.TestCase):
 
         login_response = self.client.post(
             "/login",
-            data={"username": "Flareon", "password": "mushroom"},
+            data={"username": "test_admin", "password": "test_pass"},
             follow_redirects=False,
         )
         self.assertEqual(login_response.status_code, 302)
@@ -1295,10 +1309,11 @@ class PtcgGalleryAppTests(unittest.TestCase):
 
     def test_register_and_change_password(self):
         """注册新账号后不能直接用旧会话访问，改密后能用新密码登录。"""
+        invite_code = self._generate_invite_code(self.client)
         # 当前是 RhymesX (id=1)
         register_response = self.client.post(
             "/api/accounts",
-            json={"name": "TestUser", "password": "test1234"},
+            json={"name": "TestUser", "password": "test1234", "inviteCode": invite_code},
         )
         self.assertEqual(register_response.status_code, 201)
         items = register_response.get_json()["items"]
@@ -1307,7 +1322,7 @@ class PtcgGalleryAppTests(unittest.TestCase):
         # 修改当前账号密码
         change_response = self.client.put(
             "/api/accounts/password",
-            json={"oldPassword": "mushroom", "newPassword": "newpass5678"},
+            json={"oldPassword": "test_pass", "newPassword": "newpass5678"},
         )
         self.assertEqual(change_response.status_code, 200)
         self.assertTrue(change_response.get_json()["ok"])
@@ -1317,7 +1332,7 @@ class PtcgGalleryAppTests(unittest.TestCase):
             session.clear()
         bad_login = self.client.post(
             "/login",
-            data={"username": "RhymesX", "password": "mushroom"},
+            data={"username": "RhymesX", "password": "test_pass"},
             follow_redirects=False,
         )
         self.assertEqual(bad_login.status_code, 401)
@@ -1341,9 +1356,13 @@ class PtcgGalleryAppTests(unittest.TestCase):
         self.assertEqual(testuser_login.status_code, 302)
 
     def test_admin_can_reset_regular_account_password(self):
-        """管理员（Flareon 登录）可重置普通账号密码；普通用户不可调用。"""
+        """管理员（test_admin 登录）可重置普通账号密码；普通用户不可调用。"""
         # 注册一个普通账号
-        self.client.post("/api/accounts", json={"name": "Peon", "password": "peonpass"})
+        invite_code = self._generate_invite_code(self.client)
+        # _generate_invite_code 设了 is_admin=True，清掉它来模拟普通用户
+        with self.client.session_transaction() as session:
+            session["is_admin"] = False
+        self.client.post("/api/accounts", json={"name": "Peon", "password": "peonpass", "inviteCode": invite_code})
 
         # 当前 session 是 account_id=1, account_name=RhymesX（非管理员 session）
         # 普通用户调用 admin reset → 403
@@ -1358,7 +1377,7 @@ class PtcgGalleryAppTests(unittest.TestCase):
             session.clear()
         admin_login = self.client.post(
             "/login",
-            data={"username": "Flareon", "password": "mushroom"},
+            data={"username": "test_admin", "password": "test_pass"},
             follow_redirects=False,
         )
         self.assertEqual(admin_login.status_code, 302)

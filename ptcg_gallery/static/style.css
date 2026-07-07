@@ -165,6 +165,78 @@ button:hover,
     justify-content: flex-start;
 }
 
+/* ── 管理员重置面板 ───────────────────────────────────────── */
+
+.admin-reset-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding-top: 8px;
+    margin-top: 4px;
+    border-top: 1px solid var(--border);
+}
+
+.admin-reset-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.admin-reset-row select {
+    flex: 1 1 0;
+    min-width: 0;
+    min-height: 36px;
+    border-radius: 10px;
+}
+
+.admin-reset-row input {
+    flex: 1 1 0;
+    min-width: 0;
+    min-height: 36px;
+    border-radius: 10px;
+}
+
+/* ── 侧边栏链接组 ─────────────────────────────────────────── */
+
+.sidebar-link-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px 0;
+    border-top: 1px solid var(--border);
+}
+
+.sidebar-link-group:first-of-type {
+    border-top: none;
+}
+
+.sidebar-group-label {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.sidebar-link-group .button-link,
+.sidebar-link-group .upload-button {
+    justify-content: center;
+    padding: 10px 14px;
+    font-size: 13px;
+    border-radius: 10px;
+}
+
+.sidebar-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+}
+
+.sidebar-row .button-link,
+.sidebar-row .upload-button {
+    width: 100%;
+}
+
 /* ── 爬虫控制面板 ─────────────────────────────────────────── */
 
 .crawler-panel {

@@ -42,10 +42,13 @@
                 </label>
             </div>
             <div class="search-row">
-                <input id="searchInput" type="text" placeholder="输入编号、卡牌名或解析后的商品名">
+                <!-- 隐藏输入框吃掉浏览器的自动填充 -->
+                <input type="text" style="display:none;" autocomplete="username">
+                <input type="password" style="display:none;" autocomplete="current-password">
+                <input id="searchInput" type="text" placeholder="输入编号、卡牌名或解析后的商品名" autocomplete="off">
                 <button id="refreshSearchBtn" type="button">搜索</button>
             </div>
-            <div class="toolbar compact">
+            <div class="toolbar compact" id="catalogToolbar">
                 <button id="importDefaultCatalogBtn" type="button">更新 data/卡表.xlsx</button>
                 <label class="upload-button">
                     上传新的卡表.xlsx
@@ -68,41 +71,59 @@
                 <div class="section-head compact-head">
                     <h3 class="section-title">账号</h3>
                     <span class="section-count" id="currentAccountName">加载中</span>
+                    <span class="section-count" id="accountTotalCount" style="display:none;"></span>
                 </div>
 
-                <div id="adminResetPanel" style="display:none;padding-top:4px;">
-                    <div class="account-create-row">
+                <div id="adminResetPanel" class="admin-reset-panel" style="display:none;">
+                    <label for="adminResetAccountSelect" class="field-label" style="margin-bottom:6px;">管理员重置密码</label>
+                    <div class="admin-reset-row">
                         <select id="adminResetAccountSelect" aria-label="目标账号"></select>
                         <input id="adminResetPasswordInput" type="password" placeholder="新密码（≥4位）">
-                        <button id="adminResetBtn" type="button" class="danger">重置</button>
                     </div>
+                    <div style="display:flex;gap:8px;">
+                        <button id="adminResetBtn" type="button" class="danger">重置密码</button>
+                        <button id="adminDeleteAccountBtn" type="button" class="danger" style="flex:1;">删除账号</button>
+                    </div>
+                </div>
+
+                <div id="invitePanel" style="display:none;border-top:1px solid var(--border);padding-top:8px;margin-top:4px;">
+                    <label class="field-label" style="margin-bottom:6px;">邀请码管理</label>
+                    <div style="display:flex;gap:8px;margin-bottom:8px;">
+                        <button id="generateInviteBtn" type="button" style="flex:1;">生成邀请码</button>
+                    </div>
+                    <div id="inviteCodeList" style="font-size:12px;color:var(--muted);">
+                        <p id="inviteEmptyMsg">暂无有效邀请码</p>
+                    </div>
+                    <p class="status-line" id="inviteStatus" style="margin:4px 0 0;"></p>
                 </div>
 
                 <p class="status-line" id="accountStatus">在登录页注册新账号，改密请点击右上角按钮。</p>
             </div>
 
-            <div class="toolbar compact">
+            <div class="sidebar-link-group">
                 <a class="button-link" href="/decks">打开卡组管理</a>
                 <a class="button-link secondary" href="/inventory-table">打开库存表格</a>
             </div>
 
-            <div class="toolbar compact">
-                <a class="button-link" href="/api/export/state">导出账号 JSON</a>
-                <label class="upload-button secondary">
-                    导入账号 JSON
-                    <input id="stateUploadInput" type="file" accept=".json" hidden>
-                </label>
+            <div class="sidebar-link-group">
+                <span class="sidebar-group-label">数据备份</span>
+                <div class="sidebar-row">
+                    <a class="button-link" href="/api/export/state">导出账号 JSON</a>
+                    <label class="upload-button secondary">
+                        导入账号 JSON
+                        <input id="stateUploadInput" type="file" accept=".json" hidden>
+                    </label>
+                </div>
+                <div class="sidebar-row">
+                    <a class="button-link" href="/api/export/inventory">导出库存 JSON</a>
+                    <label class="upload-button secondary">
+                        导入库存 JSON
+                        <input id="inventoryUploadInput" type="file" accept=".json" hidden>
+                    </label>
+                </div>
             </div>
 
-            <div class="toolbar compact">
-                <a class="button-link" href="/api/export/inventory">导出库存 JSON</a>
-                <label class="upload-button secondary">
-                    导入库存 JSON
-                    <input id="inventoryUploadInput" type="file" accept=".json" hidden>
-                </label>
-            </div>
-
-            <div class="crawler-panel">
+            <div class="crawler-panel" id="crawlerPanel">
                 <div class="section-head compact-head">
                     <h3 class="section-title">卡图下载</h3>
                     <span class="section-count" id="crawlerModeLabel">仅本地</span>

@@ -38,7 +38,14 @@ const elements = {
     adminResetAccountSelect: document.getElementById('adminResetAccountSelect'),
     adminResetPasswordInput: document.getElementById('adminResetPasswordInput'),
     adminResetBtn: document.getElementById('adminResetBtn'),
+    adminDeleteAccountBtn: document.getElementById('adminDeleteAccountBtn'),
+    accountTotalCount: document.getElementById('accountTotalCount'),
     accountStatus: document.getElementById('accountStatus'),
+    invitePanel: document.getElementById('invitePanel'),
+    generateInviteBtn: document.getElementById('generateInviteBtn'),
+    inviteCodeList: document.getElementById('inviteCodeList'),
+    inviteEmptyMsg: document.getElementById('inviteEmptyMsg'),
+    inviteStatus: document.getElementById('inviteStatus'),
     importDefaultCatalogBtn: document.getElementById('importDefaultCatalogBtn'),
     catalogUploadInput: document.getElementById('catalogUploadInput'),
     stateUploadInput: document.getElementById('stateUploadInput'),
@@ -219,12 +226,61 @@ function renderAccounts(payload) {
             .map(item => `<option value="${item.id}">${escapeHtml(item.name)}</option>`)
             .join('');
     }
+    if (elements.accountTotalCount) {
+        elements.accountTotalCount.style.display = state.isAdmin ? '' : 'none';
+        elements.accountTotalCount.textContent = state.isAdmin ? `共 ${(payload?.items || []).length} 个账号` : '';
+    }
+    if (elements.invitePanel) {
+        elements.invitePanel.style.display = state.isAdmin ? '' : 'none';
+    }
+    // 卡图下载面板仅管理员可见
+    const crawlerPanel = document.getElementById('crawlerPanel');
+    if (crawlerPanel) {
+        crawlerPanel.style.display = state.isAdmin ? '' : 'none';
+    }
+    if (state.isAdmin) {
+        loadInviteCodes();
+    }
 }
 
 async function loadAccounts() {
     const payload = await api('/api/accounts');
     renderAccounts(payload);
     return payload;
+}
+
+// ── 邀请码管理（仅管理员） ───────────────────────────
+
+async function loadInviteCodes() {
+    try {
+        const data = await api('/api/invite-codes');
+        const codes = data?.codes || [];
+        if (!elements.inviteCodeList) return;
+        if (codes.length === 0) {
+            elements.inviteCodeList.innerHTML = '<p id="inviteEmptyMsg">暂无有效邀请码</p>';
+            return;
+        }
+        elements.inviteCodeList.innerHTML = codes.map(c => {
+            const expiresAt = c.expiresAt ? new Date(c.expiresAt + 'Z').toLocaleString('zh-CN') : '-';
+            const timeLeft = c.expiresAt ? `<span style="color:var(--muted);">（失效: ${expiresAt}）</span>` : '';
+            return `<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid var(--border);">
+                <code style="font-size:14px;font-weight:700;">${escapeHtml(c.code)}</code>
+                ${timeLeft}
+            </div>`;
+        }).join('');
+    } catch (error) {
+        setStatus(elements.inviteStatus, error.message, 'warning');
+    }
+}
+
+async function generateInviteCode() {
+    try {
+        const data = await api('/api/invite-codes', { method: 'POST' });
+        await loadInviteCodes();
+        setStatus(elements.inviteStatus, '邀请码已生成，有效期 24 小时。', 'success');
+    } catch (error) {
+        setStatus(elements.inviteStatus, error.message, 'warning');
+    }
 }
 
 // ── 改密弹窗 ───────────────────────────────────────────
@@ -316,6 +372,26 @@ async function adminResetPassword() {
         });
         if (elements.adminResetPasswordInput) elements.adminResetPasswordInput.value = '';
         setStatus(elements.accountStatus, `已重置账号“${targetName}”的密码。`, 'success');
+    } catch (error) {
+        setStatus(elements.accountStatus, error.message, 'warning');
+    }
+}
+
+async function adminDeleteAccount() {
+    const select = elements.adminResetAccountSelect;
+    const accountId = Number(select?.value || 0);
+    if (!accountId) {
+        setStatus(elements.accountStatus, '请选择要删除的目标账号。', 'warning');
+        return;
+    }
+    const targetName = select?.options[select.selectedIndex]?.textContent || accountId;
+    if (!confirm(`确定要删除账号“${targetName}”吗？\n\n该账号的所有卡组和库存数据将被永久删除，无法恢复。`)) {
+        return;
+    }
+    try {
+        await api(`/api/accounts/${accountId}`, { method: 'DELETE' });
+        await loadAccounts();
+        setStatus(elements.accountStatus, `已删除账号“${targetName}”。`, 'success');
     } catch (error) {
         setStatus(elements.accountStatus, error.message, 'warning');
     }
@@ -845,6 +921,8 @@ elements.adminResetBtn?.addEventListener('click', adminResetPassword);
 elements.adminResetPasswordInput?.addEventListener('keydown', (event) => {
     if (event.key === 'Enter') { event.preventDefault(); void adminResetPassword(); }
 });
+elements.generateInviteBtn?.addEventListener('click', generateInviteCode);
+elements.adminDeleteAccountBtn?.addEventListener('click', adminDeleteAccount);
 
 if (elements.deckForm) {
     elements.deckForm.addEventListener('submit', async (event) => {
@@ -1034,7 +1112,9 @@ async function initCrawlerControls() {
         await Promise.all([loadAccounts(), loadSummary(), loadDecks(true), loadSearchOptions()]);
         await refreshSearch(false);
         elements.cardDetail.innerHTML = EMPTY_DETAIL_HTML;
-        await initCrawlerControls();
+        if (state.isAdmin) {
+            await initCrawlerControls();
+        }
     } catch (error) {
         setStatus(elements.searchStatus, error.message, 'warning');
     }
