@@ -148,6 +148,9 @@ DEFAULT_SEARCH_PREFERENCES = {
     "selectedRegulations": [],
     "considerSameNameRegulation": False,
 }
+CATALOG_DB_SCHEMA_VERSION = 1
+ACCOUNT_DB_SCHEMA_VERSION = 1
+USER_SETTINGS_SEARCH_PREFERENCES_KEY = "search.preferences"
 
 
 @dataclass(slots=True)
@@ -155,6 +158,7 @@ class AppPaths:
     root_dir: Path
     data_dir: Path
     db_path: Path
+    accounts_dir: Path
     default_excel_path: Path
 
 
@@ -174,10 +178,13 @@ def build_paths(root_dir: str | os.PathLike[str]) -> AppPaths:
     root = Path(root_dir).resolve()
     data_dir = root / "data"
     data_dir.mkdir(parents=True, exist_ok=True)
+    accounts_dir = data_dir / "accounts"
+    accounts_dir.mkdir(parents=True, exist_ok=True)
     return AppPaths(
         root_dir=root,
         data_dir=data_dir,
         db_path=data_dir / "ptcg_gallery.db",
+        accounts_dir=accounts_dir,
         default_excel_path=data_dir / DEFAULT_EXCEL_NAME,
     )
 
@@ -298,24 +305,105 @@ CREATE INDEX IF NOT EXISTS idx_invite_codes_code ON invite_codes(code);
 CREATE INDEX IF NOT EXISTS idx_invite_codes_expires ON invite_codes(expires_at);
 """
 
+# 用户独立数据库的 schema（每个用户一个文件），不含 account_id 列
+ACCOUNT_SCHEMA_SQL = """
+PRAGMA foreign_keys = ON;
+
+CREATE TABLE IF NOT EXISTS free_inventory (
+    card_id INTEGER NOT NULL,
+    quantity INTEGER NOT NULL DEFAULT 0 CHECK (quantity >= 0),
+    PRIMARY KEY(card_id)
+);
+
+CREATE TABLE IF NOT EXISTS decks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    description TEXT NOT NULL DEFAULT '',
+    color TEXT NOT NULL DEFAULT '',
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS deck_cards (
+    deck_id INTEGER NOT NULL,
+    card_id INTEGER NOT NULL,
+    quantity INTEGER NOT NULL DEFAULT 0 CHECK (quantity >= 0),
+    backup_quantity INTEGER NOT NULL DEFAULT 0 CHECK (backup_quantity >= 0),
+    PRIMARY KEY(deck_id, card_id),
+    FOREIGN KEY(deck_id) REFERENCES decks(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS deck_basic_energies (
+    deck_id INTEGER NOT NULL,
+    energy_code TEXT NOT NULL,
+    quantity INTEGER NOT NULL DEFAULT 0 CHECK (quantity >= 0),
+    PRIMARY KEY(deck_id, energy_code),
+    FOREIGN KEY(deck_id) REFERENCES decks(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS deck_section_orders (
+    deck_id INTEGER NOT NULL,
+    section_key TEXT NOT NULL,
+    entry_key TEXT NOT NULL,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY(deck_id, section_key, entry_key),
+    FOREIGN KEY(deck_id) REFERENCES decks(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS holdings_group_orders (
+    section_key TEXT NOT NULL,
+    group_key TEXT NOT NULL,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY(section_key, group_key)
+);
+
+CREATE TABLE IF NOT EXISTS holdings_card_orders (
+    card_id INTEGER NOT NULL,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY(card_id)
+);
+
+CREATE TABLE IF NOT EXISTS user_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+"""
+
 
 class CardRepository:
     _account_local = threading.local()
 
-    def __init__(self, db_path: str | os.PathLike[str]):
+    def __init__(self, db_path: str | os.PathLike[str], *, accounts_dir: str | os.PathLike[str] | None = None):
         self.db_path = str(db_path)
         self._init_admin_pass = ""
         self.search_preferences_path = Path(self.db_path).resolve().parent / SEARCH_PREFERENCES_FILE_NAME
+        self.accounts_dir = str(accounts_dir) if accounts_dir else str(Path(self.db_path).resolve().parent / "accounts")
+        Path(self.accounts_dir).mkdir(parents=True, exist_ok=True)
         self.initialize()
 
     def set_init_admin_pass(self, password: str):
         self._init_admin_pass = str(password or "")
 
+    def _configure_connection(self, conn: sqlite3.Connection):
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("PRAGMA busy_timeout = 5000")
+
+    def _connect_sqlite(self, db_path: str | os.PathLike[str]) -> sqlite3.Connection:
+        conn = sqlite3.connect(str(db_path))
+        self._configure_connection(conn)
+        return conn
+
+    def _set_db_schema_version(self, conn: sqlite3.Connection, version: int):
+        conn.execute(f"PRAGMA user_version = {int(version)}")
+
     @contextmanager
     def connect(self):
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA foreign_keys = ON")
+        """Legacy alias for the shared catalog database."""
+        conn = self._connect_sqlite(self.db_path)
         try:
             yield conn
             conn.commit()
@@ -325,9 +413,61 @@ class CardRepository:
         finally:
             conn.close()
 
+    @contextmanager
+    def connect_catalog(self):
+        """连接共享的 catalog 数据库（cards, accounts, invite_codes 等）。"""
+        conn = self._connect_sqlite(self.db_path)
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def _account_db_path(self, account_id: int) -> str:
+        return str(Path(self.accounts_dir) / f"{int(account_id)}.db")
+
+    @contextmanager
+    def connect_account(self, account_id: int):
+        """连接指定用户的独立数据库，同时 ATTACH catalog 数据库为 shared。"""
+        account_id = int(account_id)
+        self._init_account_db(account_id)
+        db_path = self._account_db_path(account_id)
+        conn = self._connect_sqlite(db_path)
+        conn.execute("ATTACH DATABASE ? AS shared", (self.db_path,))
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def _init_account_db(self, account_id: int):
+        """初始化指定用户的独立数据库（建表）。"""
+        account_id = int(account_id)
+        db_path = self._account_db_path(account_id)
+        conn = self._connect_sqlite(db_path)
+        try:
+            conn.executescript(ACCOUNT_SCHEMA_SQL)
+            self._set_db_schema_version(conn, ACCOUNT_DB_SCHEMA_VERSION)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def _delete_account_db(self, account_id: int):
+        Path(self._account_db_path(account_id)).unlink(missing_ok=True)
+
     def initialize(self):
         with self.connect() as conn:
             conn.executescript(SCHEMA_SQL)
+            self._set_db_schema_version(conn, CATALOG_DB_SCHEMA_VERSION)
             self._ensure_card_attribute_color_column(conn)
             self._ensure_card_group_sort_order_column(conn)
             self._ensure_deck_color_column(conn)
@@ -345,6 +485,8 @@ class CardRepository:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_free_inventory_account ON free_inventory(account_id, card_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_decks_account_sort_order ON decks(account_id, sort_order, id)")
         self._ensure_default_account_password(conn)
+        for row in conn.execute("SELECT id FROM accounts ORDER BY id ASC").fetchall():
+            self._init_account_db(int(row["id"]))
 
     def _ensure_default_account(self, conn: sqlite3.Connection) -> int:
         row = conn.execute("SELECT id FROM accounts WHERE name = ?", (DEFAULT_ACCOUNT_NAME,)).fetchone()
@@ -363,6 +505,8 @@ class CardRepository:
             conn.execute("ALTER TABLE accounts ADD COLUMN password_hash TEXT NOT NULL DEFAULT ''")
 
     def _ensure_default_account_password(self, conn: sqlite3.Connection):
+        if not self._init_admin_pass:
+            return
         row = conn.execute("SELECT id, password_hash FROM accounts WHERE name = ?", (DEFAULT_ACCOUNT_NAME,)).fetchone()
         if row is None:
             return
@@ -371,7 +515,7 @@ class CardRepository:
             return
         conn.execute(
             "UPDATE accounts SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-            (self.build_password_hash(self._init_admin_pass or ""), int(row["id"])),
+            (self.build_password_hash(self._init_admin_pass), int(row["id"])),
         )
 
     @classmethod
@@ -594,8 +738,18 @@ class CardRepository:
         self._ensure_account_storage(conn)
         return self._resolve_account_id_from_context(conn)
 
+    def _resolve_account_id(self) -> int:
+        with self.connect_catalog() as conn:
+            return self.get_current_account_id(conn)
+
+    @contextmanager
+    def connect_current_account(self):
+        account_id = self._resolve_account_id()
+        with self.connect_account(account_id) as conn:
+            yield conn
+
     def list_accounts(self) -> dict[str, Any]:
-        with self.connect() as conn:
+        with self.connect_catalog() as conn:
             current_account_id = self.get_current_account_id(conn)
             rows = conn.execute(
                 """
@@ -603,15 +757,7 @@ class CardRepository:
                        a.name,
                        a.sort_order,
                        a.created_at,
-                       a.updated_at,
-                       COALESCE((SELECT SUM(quantity) FROM free_inventory fi WHERE fi.account_id = a.id), 0) AS free_count,
-                       COALESCE((
-                           SELECT SUM(dc.quantity)
-                           FROM deck_cards dc
-                           JOIN decks d ON d.id = dc.deck_id
-                           WHERE d.account_id = a.id
-                       ), 0) AS in_deck_count,
-                       COALESCE((SELECT COUNT(*) FROM decks d WHERE d.account_id = a.id), 0) AS deck_count
+                       a.updated_at
                 FROM accounts a
                 ORDER BY a.sort_order ASC, a.id ASC
                 """
@@ -620,9 +766,7 @@ class CardRepository:
             dict(row)
             | {
                 "sortOrder": row["sort_order"],
-                "freeCount": row["free_count"],
-                "inDeckCount": row["in_deck_count"],
-                "deckCount": row["deck_count"],
+                **self._account_db_stats(int(row["id"])),
                 "isCurrent": int(row["id"]) == current_account_id,
             }
             for row in rows
@@ -649,10 +793,13 @@ class CardRepository:
             except sqlite3.IntegrityError as exc:
                 raise ConflictError(f"账号“{clean_name}”已存在") from exc
             account_id = int(cursor.lastrowid)
+        self._init_account_db(account_id)
+        with self.connect_account(account_id) as account_conn:
+            self._ensure_default_decks_for_account(account_conn)
         return self.list_accounts()
 
     def switch_account(self, account_id: int) -> dict[str, Any]:
-        with self.connect() as conn:
+        with self.connect_catalog() as conn:
             row = conn.execute("SELECT id FROM accounts WHERE id = ?", (int(account_id),)).fetchone()
             if row is None:
                 raise NotFoundError("账号不存在")
@@ -661,7 +808,7 @@ class CardRepository:
 
     def delete_account(self, account_id: int) -> dict[str, Any]:
         account_id = int(account_id)
-        with self.connect() as conn:
+        with self.connect_catalog() as conn:
             account_count = conn.execute("SELECT COUNT(*) FROM accounts").fetchone()[0]
             if account_count <= 1:
                 raise ServiceError("至少需要保留一个账号")
@@ -672,6 +819,7 @@ class CardRepository:
                 raise ServiceError("不能删除管理员账号")
             conn.execute("DELETE FROM invite_codes WHERE used_by_account_id = ?", (account_id,))
             conn.execute("DELETE FROM accounts WHERE id = ?", (account_id,))
+        self._delete_account_db(account_id)
         return self.list_accounts()
 
     def get_account_by_name(self, name: str) -> dict[str, Any] | None:
@@ -785,16 +933,16 @@ class CardRepository:
             )
         return True
 
-    def _ensure_default_decks_for_account(self, conn: sqlite3.Connection, account_id: int) -> list[str]:
+    def _ensure_default_decks_for_account(self, conn: sqlite3.Connection) -> list[str]:
         created: list[str] = []
         for deck_name in DEFAULT_DECKS:
-            deck = conn.execute("SELECT id, color FROM decks WHERE account_id = ? AND name = ?", (account_id, deck_name)).fetchone()
+            deck = conn.execute("SELECT id, color FROM decks WHERE name = ?", (deck_name,)).fetchone()
             default_color = DEFAULT_DECK_COLORS.get(deck_name, DEFAULT_DECK_COLOR)
             if deck is None:
-                next_sort_order = conn.execute("SELECT COALESCE(MAX(sort_order), 0) + 1 FROM decks WHERE account_id = ?", (account_id,)).fetchone()[0]
+                next_sort_order = conn.execute("SELECT COALESCE(MAX(sort_order), 0) + 1 FROM decks").fetchone()[0]
                 conn.execute(
-                    "INSERT INTO decks(account_id, name, description, color, sort_order, updated_at) VALUES (?, ?, '', ?, ?, CURRENT_TIMESTAMP)",
-                    (account_id, deck_name, default_color, next_sort_order),
+                    "INSERT INTO decks(name, description, color, sort_order, updated_at) VALUES (?, '', ?, ?, CURRENT_TIMESTAMP)",
+                    (deck_name, default_color, next_sort_order),
                 )
                 created.append(deck_name)
             elif not normalize_text(deck["color"]) or normalize_text(deck["color"]) == LEGACY_DEFAULT_DECK_COLORS.get(deck_name, ""):
@@ -808,33 +956,26 @@ class CardRepository:
         excel = Path(excel_path)
         if not excel.exists():
             return None
-        with self.connect() as conn:
+        with self.connect_catalog() as conn:
             card_count = conn.execute("SELECT COUNT(*) FROM cards").fetchone()[0]
         if card_count > 0:
             return None
         return self.import_catalog_from_excel(excel)
 
     def ensure_default_decks(self) -> list[str]:
-        with self.connect() as conn:
-            account_id = self.get_current_account_id(conn)
-            created = self._ensure_default_decks_for_account(conn, account_id)
+        account_id = self._resolve_account_id()
+        with self.connect_account(account_id) as conn:
+            created = self._ensure_default_decks_for_account(conn)
         return created
 
     def stats(self) -> dict[str, Any]:
-        with self.connect() as conn:
-            account_id = self.get_current_account_id(conn)
-            card_catalog = conn.execute("SELECT COUNT(*) FROM cards").fetchone()[0]
-            total_free = conn.execute("SELECT COALESCE(SUM(quantity), 0) FROM free_inventory WHERE account_id = ?", (account_id,)).fetchone()[0]
-            total_in_decks = conn.execute(
-                """
-                SELECT COALESCE(SUM(dc.quantity), 0)
-                FROM deck_cards dc
-                JOIN decks d ON d.id = dc.deck_id
-                WHERE d.account_id = ?
-                """,
-                (account_id,),
-            ).fetchone()[0]
-            deck_count = conn.execute("SELECT COUNT(*) FROM decks WHERE account_id = ?", (account_id,)).fetchone()[0]
+        account_id = self._resolve_account_id()
+        with self.connect_account(account_id) as conn:
+            card_catalog = conn.execute("SELECT COUNT(*) FROM shared.cards").fetchone()[0]
+            total_free = conn.execute("SELECT COALESCE(SUM(quantity), 0) FROM free_inventory").fetchone()[0]
+            total_in_decks = conn.execute("SELECT COALESCE(SUM(quantity), 0) FROM deck_cards").fetchone()[0]
+            deck_count = conn.execute("SELECT COUNT(*) FROM decks").fetchone()[0]
+        with self.connect_catalog() as conn:
             account_row = conn.execute("SELECT id, name FROM accounts WHERE id = ?", (account_id,)).fetchone()
         return {
             "catalogCount": card_catalog,
@@ -846,12 +987,10 @@ class CardRepository:
         }
 
     def list_decks(self) -> list[dict[str, Any]]:
-        with self.connect() as conn:
-            account_id = self.get_current_account_id(conn)
+        with self.connect_current_account() as conn:
             rows = conn.execute(
                 """
                 SELECT d.id,
-                       d.account_id,
                        d.name,
                        d.description,
                        d.color,
@@ -861,34 +1000,29 @@ class CardRepository:
                        COALESCE((SELECT SUM(dc.quantity) FROM deck_cards dc WHERE dc.deck_id = d.id), 0)
                        + COALESCE((SELECT SUM(dbe.quantity) FROM deck_basic_energies dbe WHERE dbe.deck_id = d.id), 0) AS card_count
                 FROM decks d
-                WHERE d.account_id = ?
                 ORDER BY d.sort_order ASC, d.id ASC
                 """,
-                (account_id,),
             ).fetchall()
         return [dict(row) | {"cardCount": row["card_count"], "sortOrder": row["sort_order"]} for row in rows]
 
     def holdings_report(self) -> dict[str, Any]:
-        with self.connect() as conn:
-            account_id = self.get_current_account_id(conn)
+        with self.connect_current_account() as conn:
             deck_rows = conn.execute(
-                "SELECT id, name, description, color, sort_order FROM decks WHERE account_id = ? ORDER BY sort_order ASC, id ASC",
-                (account_id,),
+                "SELECT id, name, description, color, sort_order FROM decks ORDER BY sort_order ASC, id ASC"
             ).fetchall()
             group_order_rows = conn.execute(
                 "SELECT section_key, group_key, sort_order FROM holdings_group_orders WHERE sort_order > 0"
             ).fetchall()
             cards = conn.execute(
-                self._search_select_sql(account_id) + " ORDER BY c.card_name COLLATE NOCASE ASC, c.product_code ASC, c.card_code ASC, c.id ASC"
+                self._search_select_sql() + " ORDER BY c.card_name COLLATE NOCASE ASC, c.product_code ASC, c.card_code ASC, c.id ASC"
             ).fetchall()
             deck_quantities_rows = conn.execute(
                 """
                 SELECT dc.card_id, d.name AS deck_name, dc.quantity
                 FROM deck_cards dc
                 JOIN decks d ON d.id = dc.deck_id
-                WHERE d.account_id = ? AND dc.quantity > 0
-                """,
-                (account_id,),
+                WHERE dc.quantity > 0
+                """
             ).fetchall()
 
         deck_names = [row["name"] for row in deck_rows]
@@ -956,11 +1090,9 @@ class CardRepository:
         if not isinstance(cards, list) or not cards:
             raise ServiceError("卡牌列表不能为空")
 
-        with self.connect() as conn:
-            account_id = self.get_current_account_id(conn)
+        with self.connect_current_account() as conn:
             deck_rows = conn.execute(
-                "SELECT id, name FROM decks WHERE account_id = ? ORDER BY sort_order ASC, id ASC",
-                (account_id,),
+                "SELECT id, name FROM decks ORDER BY sort_order ASC, id ASC"
             ).fetchall()
             deck_id_to_name = {int(row["id"]): row["name"] for row in deck_rows}
             expected_deck_ids = set(deck_id_to_name)
@@ -999,7 +1131,7 @@ class CardRepository:
                     raise ServiceError(f"缺少卡组数量：{'、'.join(missing_names)}")
 
                 row = conn.execute(
-                    "SELECT id, card_name, card_type, detail, special_text, attribute FROM cards WHERE id = ?",
+                    "SELECT id, card_name, card_type, detail, special_text, attribute FROM shared.cards WHERE id = ?",
                     (card_id,),
                 ).fetchone()
                 if row is None:
@@ -1023,10 +1155,7 @@ class CardRepository:
                 self._set_free_quantity(conn, card_id, free_quantity)
                 for deck_id, quantity in deck_quantities.items():
                     self._set_deck_quantity(conn, deck_id, card_id, quantity)
-                conn.execute(
-                    "UPDATE cards SET group_sort_order = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                    (order_index, card_id),
-                )
+                self._set_card_group_sort_order(conn, card_id, order_index)
 
         return {
             "groupKey": clean_group_key,
@@ -1054,7 +1183,7 @@ class CardRepository:
         if sorted(clean_group_keys) != sorted(current_group_keys) or len(clean_group_keys) != len(current_group_keys):
             raise ServiceError("卡牌分组顺序不完整或包含无效分组")
 
-        with self.connect() as conn:
+        with self.connect_current_account() as conn:
             conn.execute("DELETE FROM holdings_group_orders WHERE section_key = ?", (clean_section_key,))
             for sort_order, group_key in enumerate(clean_group_keys, start=1):
                 conn.execute(
@@ -1073,13 +1202,12 @@ class CardRepository:
             raise ServiceError("卡组名称不能为空")
         clean_description = normalize_text(description)
         clean_color = normalize_text(color) or DEFAULT_DECK_COLORS.get(clean_name, DEFAULT_DECK_COLOR)
-        with self.connect() as conn:
-            account_id = self.get_current_account_id(conn)
+        with self.connect_current_account() as conn:
             try:
-                next_sort_order = conn.execute("SELECT COALESCE(MAX(sort_order), 0) + 1 FROM decks WHERE account_id = ?", (account_id,)).fetchone()[0]
+                next_sort_order = conn.execute("SELECT COALESCE(MAX(sort_order), 0) + 1 FROM decks").fetchone()[0]
                 cursor = conn.execute(
-                    "INSERT INTO decks(account_id, name, description, color, sort_order, updated_at) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)",
-                    (account_id, clean_name, clean_description, clean_color, next_sort_order),
+                    "INSERT INTO decks(name, description, color, sort_order, updated_at) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)",
+                    (clean_name, clean_description, clean_color, next_sort_order),
                 )
             except sqlite3.IntegrityError as exc:
                 raise ConflictError(f"卡组“{clean_name}”已存在") from exc
@@ -1087,12 +1215,10 @@ class CardRepository:
         return self.get_deck(deck_id)
 
     def get_deck(self, deck_id: int) -> dict[str, Any]:
-        with self.connect() as conn:
-            account_id = self.get_current_account_id(conn)
+        with self.connect_current_account() as conn:
             row = conn.execute(
                 """
                 SELECT d.id,
-                       d.account_id,
                        d.name,
                        d.description,
                        d.color,
@@ -1101,9 +1227,9 @@ class CardRepository:
                        COALESCE((SELECT SUM(dc.quantity) FROM deck_cards dc WHERE dc.deck_id = d.id), 0)
                        + COALESCE((SELECT SUM(dbe.quantity) FROM deck_basic_energies dbe WHERE dbe.deck_id = d.id), 0) AS card_count
                 FROM decks d
-                WHERE d.id = ? AND d.account_id = ?
+                  WHERE d.id = ?
                 """,
-                (deck_id, account_id),
+                  (deck_id,),
             ).fetchone()
         if row is None:
             raise NotFoundError("卡组不存在")
@@ -1113,8 +1239,7 @@ class CardRepository:
 
     def get_deck_detail(self, deck_id: int) -> dict[str, Any]:
         deck = self.get_deck(deck_id)
-        with self.connect() as conn:
-            account_id = self.get_current_account_id(conn)
+        with self.connect_current_account() as conn:
             rows = conn.execute(
                 """
                 SELECT c.id,
@@ -1132,18 +1257,18 @@ class CardRepository:
                        c.regulation,
                        c.note,
                        c.nickname,
-                         c.group_sort_order,
+                                             COALESCE(hco.sort_order, c.group_sort_order, 0) AS group_sort_order,
                        COALESCE(fi.quantity, 0) AS free_quantity,
-                      dc.quantity AS deck_quantity,
-                      COALESCE(dc.backup_quantity, 0) AS backup_quantity
+                                             dc.quantity AS deck_quantity,
+                                             COALESCE(dc.backup_quantity, 0) AS backup_quantity
                 FROM deck_cards dc
-                JOIN cards c ON c.id = dc.card_id
-                JOIN decks d ON d.id = dc.deck_id
-                LEFT JOIN free_inventory fi ON fi.card_id = c.id AND fi.account_id = ?
-                WHERE dc.deck_id = ? AND d.account_id = ?
+                                JOIN shared.cards c ON c.id = dc.card_id
+                                LEFT JOIN holdings_card_orders hco ON hco.card_id = c.id
+                                LEFT JOIN free_inventory fi ON fi.card_id = c.id
+                                WHERE dc.deck_id = ?
                 ORDER BY c.card_name COLLATE NOCASE ASC, c.product_code ASC, c.card_code ASC, c.rarity ASC, c.id ASC
                 """,
-                (account_id, deck_id, account_id),
+                                (deck_id,),
             ).fetchall()
             section_order_rows = conn.execute(
                 """
@@ -1230,7 +1355,7 @@ class CardRepository:
         if not isinstance(items, list):
             raise ServiceError("基础能量数据格式不正确")
 
-        with self.connect() as conn:
+        with self.connect_current_account() as conn:
             self._ensure_deck_exists(conn, deck_id)
             quantities = {definition["code"]: 0 for definition in BASIC_DECK_ENERGY_DEFINITIONS}
             seen_codes: set[str] = set()
@@ -1257,9 +1382,8 @@ class CardRepository:
             raise ServiceError("卡组名称不能为空")
         clean_description = normalize_text(description)
         clean_color = normalize_text(color) or DEFAULT_DECK_COLORS.get(clean_name, DEFAULT_DECK_COLOR)
-        with self.connect() as conn:
-            account_id = self.get_current_account_id(conn)
-            exists = conn.execute("SELECT id FROM decks WHERE id = ? AND account_id = ?", (deck_id, account_id)).fetchone()
+        with self.connect_current_account() as conn:
+            exists = conn.execute("SELECT id FROM decks WHERE id = ?", (deck_id,)).fetchone()
             if exists is None:
                 raise NotFoundError("卡组不存在")
             try:
@@ -1272,9 +1396,8 @@ class CardRepository:
         return self.get_deck(deck_id)
 
     def delete_deck(self, deck_id: int):
-        with self.connect() as conn:
-            account_id = self.get_current_account_id(conn)
-            deck = conn.execute("SELECT id FROM decks WHERE id = ? AND account_id = ?", (deck_id, account_id)).fetchone()
+        with self.connect_current_account() as conn:
+            deck = conn.execute("SELECT id FROM decks WHERE id = ?", (deck_id,)).fetchone()
             if deck is None:
                 raise NotFoundError("卡组不存在")
             deck_cards = conn.execute(
@@ -1291,9 +1414,8 @@ class CardRepository:
         if not clean_ids:
             raise ServiceError("卡组顺序不能为空")
 
-        with self.connect() as conn:
-            account_id = self.get_current_account_id(conn)
-            rows = conn.execute("SELECT id FROM decks WHERE account_id = ? ORDER BY id ASC", (account_id,)).fetchall()
+        with self.connect_current_account() as conn:
+            rows = conn.execute("SELECT id FROM decks ORDER BY id ASC").fetchall()
             existing_ids = [row["id"] for row in rows]
             if sorted(clean_ids) != sorted(existing_ids) or len(clean_ids) != len(existing_ids):
                 raise ServiceError("卡组顺序不完整或包含无效卡组")
@@ -1313,7 +1435,7 @@ class CardRepository:
         if not isinstance(card_ids, list) or not card_ids:
             raise ServiceError("卡牌顺序不能为空")
 
-        with self.connect() as conn:
+        with self.connect_current_account() as conn:
             self._ensure_deck_exists(conn, deck_id)
             rows = conn.execute(
                 """
@@ -1323,7 +1445,7 @@ class CardRepository:
                        c.detail,
                        c.special_text
                 FROM deck_cards dc
-                JOIN cards c ON c.id = dc.card_id
+            JOIN shared.cards c ON c.id = dc.card_id
                 WHERE dc.deck_id = ? AND dc.quantity > 0
                 """,
                 (deck_id,),
@@ -1364,10 +1486,7 @@ class CardRepository:
                 raise ServiceError("卡牌顺序不完整或包含无效卡牌")
 
             for order_index, card_id in enumerate(clean_card_ids, start=1):
-                conn.execute(
-                    "UPDATE cards SET group_sort_order = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                    (order_index, card_id),
-                )
+                self._set_card_group_sort_order(conn, card_id, order_index)
 
         return self.get_deck_detail(deck_id)
 
@@ -1399,7 +1518,7 @@ class CardRepository:
         if sorted(clean_entry_keys) != sorted(current_entry_keys) or len(clean_entry_keys) != len(current_entry_keys):
             raise ServiceError("卡牌顺序不完整或包含无效卡牌")
 
-        with self.connect() as conn:
+        with self.connect_current_account() as conn:
             self._ensure_deck_exists(conn, deck_id)
             conn.execute(
                 "DELETE FROM deck_section_orders WHERE deck_id = ? AND section_key = ?",
@@ -1414,7 +1533,7 @@ class CardRepository:
         return self.get_deck_detail(deck_id)
 
     def list_search_regulations(self) -> list[str]:
-        with self.connect() as conn:
+        with self.connect_catalog() as conn:
             rows = conn.execute(
                 """
                 SELECT DISTINCT TRIM(regulation) AS regulation
@@ -1426,12 +1545,8 @@ class CardRepository:
         return [row["regulation"] for row in rows]
 
     def get_search_preferences(self) -> dict[str, Any]:
-        if not self.search_preferences_path.exists():
-            return dict(DEFAULT_SEARCH_PREFERENCES)
-        try:
-            payload = json.loads(self.search_preferences_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            return dict(DEFAULT_SEARCH_PREFERENCES)
+        with self.connect_current_account() as conn:
+            payload = self._get_user_setting_json(conn, USER_SETTINGS_SEARCH_PREFERENCES_KEY)
         return sanitize_search_preferences_payload(payload)
 
     def update_search_preferences(self, selected_regulations: list[str], consider_same_name_regulation: bool) -> dict[str, Any]:
@@ -1441,11 +1556,8 @@ class CardRepository:
                 "considerSameNameRegulation": consider_same_name_regulation,
             }
         )
-        self.search_preferences_path.parent.mkdir(parents=True, exist_ok=True)
-        self.search_preferences_path.write_text(
-            json.dumps(preferences, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        with self.connect_current_account() as conn:
+            self._set_user_setting_json(conn, USER_SETTINGS_SEARCH_PREFERENCES_KEY, preferences)
         return preferences
 
     def search_cards(
@@ -1468,10 +1580,9 @@ class CardRepository:
             seen_regulations.add(clean_regulation)
             selected_regulations.append(clean_regulation)
 
-        with self.connect() as conn:
-            account_id = self.get_current_account_id(conn)
+        with self.connect_current_account() as conn:
             rows = conn.execute(
-                self._search_select_sql(account_id) + " ORDER BY c.card_name COLLATE NOCASE ASC, c.id ASC"
+                self._search_select_sql() + " ORDER BY c.card_name COLLATE NOCASE ASC, c.id ASC"
             ).fetchall()
 
         items = [self._summary_from_row(row) for row in rows]
@@ -1513,10 +1624,9 @@ class CardRepository:
         return matched[:limit]
 
     def get_card(self, card_id: int) -> dict[str, Any]:
-        with self.connect() as conn:
-            account_id = self.get_current_account_id(conn)
+        with self.connect_current_account() as conn:
             row = conn.execute(
-                self._search_select_sql(account_id) + " WHERE c.id = ?",
+                self._search_select_sql() + " WHERE c.id = ?",
                 (card_id,),
             ).fetchone()
             if row is None:
@@ -1526,10 +1636,10 @@ class CardRepository:
                 SELECT d.id AS deck_id, d.name AS deck_name, dc.quantity, COALESCE(dc.backup_quantity, 0) AS backup_quantity
                 FROM deck_cards dc
                 JOIN decks d ON d.id = dc.deck_id
-                WHERE d.account_id = ? AND dc.card_id = ? AND dc.quantity > 0
+                WHERE dc.card_id = ? AND dc.quantity > 0
                 ORDER BY d.name COLLATE NOCASE ASC
                 """,
-                (account_id, card_id),
+                (card_id,),
             ).fetchall()
         card = self._summary_from_row(row)
         card["deckBreakdown"] = []
@@ -1547,8 +1657,7 @@ class CardRepository:
     def adjust_free_inventory(self, card_id: int, delta: int) -> dict[str, Any]:
         if delta == 0:
             raise ServiceError("数量变更不能为 0")
-        with self.connect() as conn:
-            account_id = self.get_current_account_id(conn)
+        with self.connect_current_account() as conn:
             self._ensure_card_exists(conn, card_id)
             current = self._get_free_quantity(conn, card_id)
             target = current + delta
@@ -1560,7 +1669,7 @@ class CardRepository:
 
     def set_free_inventory_quantity(self, card_id: int, quantity: int) -> dict[str, Any]:
         clean_quantity = parse_non_negative_int(quantity, field_name="空闲库存")
-        with self.connect() as conn:
+        with self.connect_current_account() as conn:
             self._ensure_card_exists(conn, card_id)
             self._set_free_quantity(conn, card_id, clean_quantity)
             self._ensure_sort_order_on_first_add(conn, card_id)
@@ -1568,7 +1677,7 @@ class CardRepository:
 
     def add_to_deck(self, card_id: int, deck_id: int, amount: int, consume_free: bool = False) -> dict[str, Any]:
         amount = parse_positive_int(amount, field_name="数量")
-        with self.connect() as conn:
+        with self.connect_current_account() as conn:
             self._ensure_card_exists(conn, card_id)
             self._ensure_deck_exists(conn, deck_id)
             if consume_free:
@@ -1583,7 +1692,7 @@ class CardRepository:
 
     def remove_from_deck(self, card_id: int, deck_id: int, amount: int, back_to_free: bool = False) -> dict[str, Any]:
         amount = parse_positive_int(amount, field_name="数量")
-        with self.connect() as conn:
+        with self.connect_current_account() as conn:
             self._ensure_card_exists(conn, card_id)
             self._ensure_deck_exists(conn, deck_id)
             current_deck = self._get_deck_quantity(conn, deck_id, card_id)
@@ -1597,7 +1706,7 @@ class CardRepository:
 
     def update_deck_backup_quantity(self, deck_id: int, card_id: int, quantity: int) -> dict[str, Any]:
         backup_quantity = parse_non_negative_int(quantity, field_name="备卡数量")
-        with self.connect() as conn:
+        with self.connect_current_account() as conn:
             self._ensure_card_exists(conn, card_id)
             self._ensure_deck_exists(conn, deck_id)
             current_quantity = self._get_deck_quantity(conn, deck_id, card_id)
@@ -1626,8 +1735,7 @@ class CardRepository:
 
         clean_target_quantity = parse_non_negative_int(target_quantity, field_name="目标数量")
 
-        with self.connect() as conn:
-            account_id = self.get_current_account_id(conn)
+        with self.connect_current_account() as conn:
             self._ensure_card_exists(conn, card_id)
             self._ensure_deck_exists(conn, deck_id)
 
@@ -1673,8 +1781,7 @@ class CardRepository:
 
     def move_deck_cards_to_free(self, deck_id: int) -> dict[str, Any]:
         """将卡组中所有卡牌转回空闲库存。"""
-        with self.connect() as conn:
-            account_id = self.get_current_account_id(conn)
+        with self.connect_current_account() as conn:
             self._ensure_deck_exists(conn, deck_id)
             rows = conn.execute(
                 "SELECT card_id, quantity FROM deck_cards WHERE deck_id = ? AND quantity > 0",
@@ -1690,8 +1797,7 @@ class CardRepository:
         if delta == 0:
             raise ServiceError("数量变更不能为 0")
 
-        with self.connect() as conn:
-            account_id = self.get_current_account_id(conn)
+        with self.connect_current_account() as conn:
             self._ensure_card_exists(conn, card_id)
 
             if delta > 0:
@@ -1711,10 +1817,10 @@ class CardRepository:
                         SELECT dc.deck_id, dc.quantity
                         FROM deck_cards dc
                         JOIN decks d ON d.id = dc.deck_id
-                        WHERE d.account_id = ? AND dc.card_id = ? AND dc.quantity > 0
+                        WHERE dc.card_id = ? AND dc.quantity > 0
                         ORDER BY d.sort_order ASC, d.id ASC
                         """,
-                        (account_id, card_id),
+                        (card_id,),
                     ).fetchall()
                     total_in_decks = sum(int(row["quantity"]) for row in deck_rows)
                     if total_in_decks < remaining:
@@ -1731,7 +1837,20 @@ class CardRepository:
         return self.get_card(card_id)
 
     def delete_card(self, card_id: int):
-        with self.connect() as conn:
+        for account_db_path in sorted(Path(self.accounts_dir).glob("*.db")):
+            account_conn = self._connect_sqlite(account_db_path)
+            try:
+                account_conn.execute("DELETE FROM free_inventory WHERE card_id = ?", (card_id,))
+                account_conn.execute("DELETE FROM deck_cards WHERE card_id = ?", (card_id,))
+                account_conn.execute("DELETE FROM holdings_card_orders WHERE card_id = ?", (card_id,))
+                account_conn.commit()
+            except Exception:
+                account_conn.rollback()
+                raise
+            finally:
+                account_conn.close()
+
+        with self.connect_catalog() as conn:
             self._ensure_card_exists(conn, card_id)
             conn.execute("DELETE FROM cards WHERE id = ?", (card_id,))
 
@@ -1754,8 +1873,8 @@ class CardRepository:
             created = 0
             updated = 0
             skipped = 0
-            with self.connect() as conn:
-                account_id = self.get_current_account_id(conn)
+            with self.connect_current_account() as conn:
+                cards_table = self._catalog_cards_table(conn)
                 for row in sheet.iter_rows(min_row=2):
                     values = tuple(cell.value for cell in row)
                     if values is None or all(value is None or normalize_text(str(value)) == "" for value in values):
@@ -1769,13 +1888,13 @@ class CardRepository:
                         skipped += 1
                         continue
                     source_key = build_source_key(record)
-                    existing = conn.execute("SELECT id FROM cards WHERE source_key = ?", (source_key,)).fetchone()
+                    existing = conn.execute(f"SELECT id FROM {cards_table} WHERE source_key = ?", (source_key,)).fetchone()
                     if existing is None:
                         existing = self._find_card_by_catalog_identity(conn, record)
                     if existing is None:
                         cursor = conn.execute(
-                            """
-                            INSERT INTO cards(
+                            f"""
+                            INSERT INTO {cards_table}(
                                 source_key, product_name, product_code, card_code, card_name,
                                 card_type, detail, special_text, attribute, attribute_color, rarity, regulation,
                                 note, nickname, initial_quantity, updated_at
@@ -1805,8 +1924,8 @@ class CardRepository:
                     else:
                         card_id = existing["id"]
                         conn.execute(
-                            """
-                            UPDATE cards
+                            f"""
+                            UPDATE {cards_table}
                             SET source_key = ?,
                                 product_name = ?,
                                 product_code = ?,
@@ -1844,11 +1963,7 @@ class CardRepository:
                                 card_id,
                             ),
                         )
-                        existing_inventory = conn.execute(
-                            "SELECT quantity FROM free_inventory WHERE account_id = ? AND card_id = ?",
-                            (account_id, card_id),
-                        ).fetchone()
-                        if existing_inventory is None:
+                        if self._get_free_quantity(conn, card_id) <= 0:
                             self._set_free_quantity(conn, card_id, record["quantity"])
                         updated += 1
             return {
@@ -1862,34 +1977,28 @@ class CardRepository:
             workbook.close()
 
     def export_state(self) -> dict[str, Any]:
-        with self.connect() as conn:
-            account_id = self.get_current_account_id(conn)
-            account_row = conn.execute("SELECT id, name FROM accounts WHERE id = ?", (account_id,)).fetchone()
+        account_id = self._resolve_account_id()
+        with self.connect_account(account_id) as conn:
             cards = conn.execute(
-                self._search_select_sql(account_id) + " ORDER BY c.product_code ASC, c.card_code ASC, c.id ASC"
+                self._search_select_sql() + " ORDER BY c.product_code ASC, c.card_code ASC, c.id ASC"
             ).fetchall()
             deck_rows = conn.execute(
-                "SELECT id, name, description, color, sort_order FROM decks WHERE account_id = ? ORDER BY sort_order ASC, id ASC",
-                (account_id,),
+                "SELECT id, name, description, color, sort_order FROM decks ORDER BY sort_order ASC, id ASC"
             ).fetchall()
             deck_cards = conn.execute(
                 """
-                SELECT dc.deck_id, dc.card_id, dc.quantity, COALESCE(dc.backup_quantity, 0) AS backup_quantity
-                FROM deck_cards dc
-                JOIN decks d ON d.id = dc.deck_id
-                WHERE d.account_id = ? AND dc.quantity > 0
-                """,
-                (account_id,),
+                SELECT deck_id, card_id, quantity, COALESCE(backup_quantity, 0) AS backup_quantity
+                FROM deck_cards
+                WHERE quantity > 0
+                """
             ).fetchall()
             deck_basic_energy_rows = conn.execute(
                 """
-                SELECT dbe.deck_id, dbe.energy_code, dbe.quantity
-                FROM deck_basic_energies dbe
-                JOIN decks d ON d.id = dbe.deck_id
-                WHERE d.account_id = ? AND dbe.quantity > 0
-                ORDER BY dbe.deck_id ASC, dbe.energy_code ASC
-                """,
-                (account_id,),
+                SELECT deck_id, energy_code, quantity
+                FROM deck_basic_energies
+                WHERE quantity > 0
+                ORDER BY deck_id ASC, energy_code ASC
+                """
             ).fetchall()
             group_order_rows = conn.execute(
                 """
@@ -1899,6 +2008,8 @@ class CardRepository:
                 ORDER BY section_key ASC, sort_order ASC, group_key ASC
                 """
             ).fetchall()
+        with self.connect_catalog() as conn:
+            account_row = conn.execute("SELECT id, name FROM accounts WHERE id = ?", (account_id,)).fetchone()
 
         deck_map: dict[int, dict[str, Any]] = {row["id"]: dict(row) for row in deck_rows}
         card_deck_map: dict[int, list[dict[str, Any]]] = {}
@@ -1967,15 +2078,15 @@ class CardRepository:
 
         imported_cards = 0
         skipped_cards = 0
-        with self.connect() as conn:
-            account_id = self.get_current_account_id(conn)
-            account_deck_ids = [row["id"] for row in conn.execute("SELECT id FROM decks WHERE account_id = ?", (account_id,)).fetchall()]
+        with self.connect_current_account() as conn:
+            account_deck_ids = [row["id"] for row in conn.execute("SELECT id FROM decks").fetchall()]
             for deck_id in account_deck_ids:
                 conn.execute("DELETE FROM deck_cards WHERE deck_id = ?", (deck_id,))
                 conn.execute("DELETE FROM deck_basic_energies WHERE deck_id = ?", (deck_id,))
-            conn.execute("DELETE FROM free_inventory WHERE account_id = ?", (account_id,))
+            conn.execute("DELETE FROM free_inventory")
             conn.execute("DELETE FROM holdings_group_orders")
-            conn.execute("DELETE FROM decks WHERE account_id = ?", (account_id,))
+            conn.execute("DELETE FROM holdings_card_orders")
+            conn.execute("DELETE FROM decks")
 
             deck_name_to_id: dict[str, int] = {}
             for index, deck in enumerate(decks, start=1):
@@ -1986,8 +2097,8 @@ class CardRepository:
                 color = normalize_text((deck or {}).get("color", "")) or DEFAULT_DECK_COLOR
                 sort_order = int((deck.get("sortOrder", deck.get("sort_order", index)) if isinstance(deck, dict) else index) or index)
                 cursor = conn.execute(
-                    "INSERT INTO decks(account_id, name, description, color, sort_order, updated_at) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)",
-                    (account_id, name, description, color, sort_order),
+                    "INSERT INTO decks(name, description, color, sort_order, updated_at) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)",
+                    (name, description, color, sort_order),
                 )
                 deck_id = cursor.lastrowid
                 deck_name_to_id[name] = deck_id
@@ -2007,10 +2118,10 @@ class CardRepository:
                 source_key = normalize_text(item.get("sourceKey", ""))
                 row = None
                 if source_key:
-                    row = conn.execute("SELECT id FROM cards WHERE source_key = ?", (source_key,)).fetchone()
+                    row = conn.execute("SELECT id FROM shared.cards WHERE source_key = ?", (source_key,)).fetchone()
                 if row is None:
                     fallback = conn.execute(
-                        "SELECT id FROM cards WHERE product_code = ? AND card_code = ? AND card_name = ? LIMIT 1",
+                        "SELECT id FROM shared.cards WHERE product_code = ? AND card_code = ? AND card_name = ? LIMIT 1",
                         (
                             normalize_text(item.get("productCode", "")),
                             normalize_text(item.get("cardCode", "")),
@@ -2024,10 +2135,7 @@ class CardRepository:
                 card_id = row["id"]
                 free_quantity = int(item.get("freeQuantity", 0) or 0)
                 group_sort_order = int(item.get("groupSortOrder", 0) or 0)
-                conn.execute(
-                    "UPDATE cards SET group_sort_order = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                    (max(0, group_sort_order), card_id),
-                )
+                self._set_card_group_sort_order(conn, card_id, max(0, group_sort_order))
                 self._set_free_quantity(conn, card_id, max(0, free_quantity))
                 for deck_entry in item.get("deckQuantities", []):
                     if not isinstance(deck_entry, dict):
@@ -2062,8 +2170,7 @@ class CardRepository:
             "deckCount": len(decks),
         }
 
-    def _search_select_sql(self, account_id: int) -> str:
-        safe_account_id = int(account_id)
+    def _search_select_sql(self) -> str:
         return f"""
         SELECT c.id,
                c.source_key,
@@ -2080,16 +2187,15 @@ class CardRepository:
                c.regulation,
                c.note,
                c.nickname,
-             c.group_sort_order,
+             COALESCE(hco.sort_order, c.group_sort_order, 0) AS group_sort_order,
                COALESCE(fi.quantity, 0) AS free_quantity,
                COALESCE(deck_totals.deck_quantity, 0) AS deck_quantity
-        FROM cards c
-        LEFT JOIN free_inventory fi ON fi.card_id = c.id AND fi.account_id = {safe_account_id}
+         FROM shared.cards c
+         LEFT JOIN holdings_card_orders hco ON hco.card_id = c.id
+         LEFT JOIN free_inventory fi ON fi.card_id = c.id
         LEFT JOIN (
             SELECT dc.card_id, SUM(dc.quantity) AS deck_quantity
             FROM deck_cards dc
-            JOIN decks d ON d.id = dc.deck_id
-            WHERE d.account_id = {safe_account_id}
             GROUP BY dc.card_id
         ) deck_totals ON deck_totals.card_id = c.id
         """
@@ -2097,17 +2203,17 @@ class CardRepository:
     # ── 纯库存导出/导入 ─────────────────────────────────────
 
     def export_inventory(self) -> dict[str, Any]:
-        with self.connect() as conn:
-            account_id = self.get_current_account_id(conn)
-            account_row = conn.execute("SELECT id, name FROM accounts WHERE id = ?", (account_id,)).fetchone()
+        account_id = self._resolve_account_id()
+        with self.connect_account(account_id) as conn:
             deck_rows = conn.execute(
-                "SELECT id, name FROM decks WHERE account_id = ? ORDER BY sort_order ASC, id ASC",
-                (account_id,),
+                "SELECT id, name FROM decks ORDER BY sort_order ASC, id ASC"
             ).fetchall()
             cards = conn.execute(
-                self._search_select_sql(account_id)
+                self._search_select_sql()
                 + " ORDER BY c.product_code ASC, c.card_code ASC, c.id ASC"
             ).fetchall()
+        with self.connect_catalog() as conn:
+            account_row = conn.execute("SELECT id, name FROM accounts WHERE id = ?", (account_id,)).fetchone()
 
         payload_cards = []
         for row in cards:
@@ -2138,18 +2244,17 @@ class CardRepository:
             raise ServiceError("库存文件缺少 cards 数组")
         imported = 0
         skipped = 0
-        with self.connect() as conn:
-            account_id = self.get_current_account_id(conn)
+        with self.connect_current_account() as conn:
             for item in cards:
                 if not isinstance(item, dict):
                     skipped += 1; continue
                 source_key = normalize_text(item.get("sourceKey", ""))
                 row = None
                 if source_key:
-                    row = conn.execute("SELECT id FROM cards WHERE source_key = ?", (source_key,)).fetchone()
+                    row = conn.execute("SELECT id FROM shared.cards WHERE source_key = ?", (source_key,)).fetchone()
                 if row is None:
                     row = conn.execute(
-                        "SELECT id FROM cards WHERE product_code = ? AND card_code = ? AND card_name = ? LIMIT 1",
+                        "SELECT id FROM shared.cards WHERE product_code = ? AND card_code = ? AND card_name = ? LIMIT 1",
                         (normalize_text(item.get("productCode", "")),
                          normalize_text(item.get("cardCode", "")),
                          normalize_text(item.get("cardName", ""))),
@@ -2204,9 +2309,9 @@ class CardRepository:
     def _find_card_by_catalog_identity(self, conn: sqlite3.Connection, record: dict[str, Any]) -> sqlite3.Row | None:
         identity_parts = build_catalog_identity_parts(record)
         return conn.execute(
-            """
+                        f"""
             SELECT id
-            FROM cards
+                        FROM {self._catalog_cards_table(conn)}
             WHERE UPPER(TRIM(product_code)) = ?
               AND UPPER(TRIM(card_code)) = ?
               AND TRIM(card_name) = ?
@@ -2221,47 +2326,116 @@ class CardRepository:
             identity_parts,
         ).fetchone()
 
+    def _account_db_stats(self, account_id: int) -> dict[str, int]:
+        account_db_path = Path(self._account_db_path(account_id))
+        if not account_db_path.exists():
+            return {"freeCount": 0, "inDeckCount": 0, "deckCount": 0}
+        conn = self._connect_sqlite(account_db_path)
+        try:
+            free_count = int(conn.execute("SELECT COALESCE(SUM(quantity), 0) FROM free_inventory").fetchone()[0])
+            in_deck_count = int(conn.execute("SELECT COALESCE(SUM(quantity), 0) FROM deck_cards").fetchone()[0])
+            deck_count = int(conn.execute("SELECT COUNT(*) FROM decks").fetchone()[0])
+        finally:
+            conn.close()
+        return {"freeCount": free_count, "inDeckCount": in_deck_count, "deckCount": deck_count}
+
+    def _has_shared_catalog(self, conn: sqlite3.Connection) -> bool:
+        return any(row[1] == "shared" for row in conn.execute("PRAGMA database_list").fetchall())
+
+    def _catalog_cards_table(self, conn: sqlite3.Connection) -> str:
+        return "shared.cards" if self._has_shared_catalog(conn) else "cards"
+
+    def _table_has_column(self, conn: sqlite3.Connection, table_name: str, column_name: str) -> bool:
+        return column_name in {row[1] for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()}
+
+    def _get_user_setting_json(self, conn: sqlite3.Connection, key: str) -> Any:
+        row = conn.execute("SELECT value FROM user_settings WHERE key = ?", (key,)).fetchone()
+        if row is None:
+            return None
+        try:
+            return json.loads(str(row["value"] or ""))
+        except json.JSONDecodeError:
+            return None
+
+    def _set_user_setting_json(self, conn: sqlite3.Connection, key: str, value: Any):
+        conn.execute(
+            "INSERT INTO user_settings(key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP",
+            (key, json.dumps(value, ensure_ascii=False)),
+        )
+
+    def _get_card_group_sort_order(self, conn: sqlite3.Connection, card_id: int) -> int:
+        row = conn.execute("SELECT sort_order FROM holdings_card_orders WHERE card_id = ?", (card_id,)).fetchone()
+        if row is not None:
+            return int(row["sort_order"] or 0)
+        row = conn.execute(
+            f"SELECT group_sort_order FROM {self._catalog_cards_table(conn)} WHERE id = ?",
+            (card_id,),
+        ).fetchone()
+        return int(row["group_sort_order"] or 0) if row is not None else 0
+
+    def _set_card_group_sort_order(self, conn: sqlite3.Connection, card_id: int, sort_order: int):
+        clean_sort_order = max(0, int(sort_order))
+        if clean_sort_order <= 0:
+            conn.execute("DELETE FROM holdings_card_orders WHERE card_id = ?", (card_id,))
+            return
+        conn.execute(
+            "INSERT INTO holdings_card_orders(card_id, sort_order) VALUES (?, ?) "
+            "ON CONFLICT(card_id) DO UPDATE SET sort_order = excluded.sort_order",
+            (card_id, clean_sort_order),
+        )
+
     def _ensure_card_exists(self, conn: sqlite3.Connection, card_id: int):
-        row = conn.execute("SELECT id FROM cards WHERE id = ?", (card_id,)).fetchone()
+        row = conn.execute(f"SELECT id FROM {self._catalog_cards_table(conn)} WHERE id = ?", (card_id,)).fetchone()
         if row is None:
             raise NotFoundError("卡牌不存在")
 
     def _ensure_deck_exists(self, conn: sqlite3.Connection, deck_id: int):
-        account_id = self.get_current_account_id(conn)
-        row = conn.execute("SELECT id FROM decks WHERE id = ? AND account_id = ?", (deck_id, account_id)).fetchone()
+        if self._table_has_column(conn, "decks", "account_id"):
+            account_id = self.get_current_account_id(conn)
+            row = conn.execute("SELECT id FROM decks WHERE id = ? AND account_id = ?", (deck_id, account_id)).fetchone()
+        else:
+            row = conn.execute("SELECT id FROM decks WHERE id = ?", (deck_id,)).fetchone()
         if row is None:
             raise NotFoundError("卡组不存在")
 
     def _get_free_quantity(self, conn: sqlite3.Connection, card_id: int) -> int:
-        account_id = self.get_current_account_id(conn)
-        row = conn.execute("SELECT quantity FROM free_inventory WHERE account_id = ? AND card_id = ?", (account_id, card_id)).fetchone()
+        if self._table_has_column(conn, "free_inventory", "account_id"):
+            account_id = self.get_current_account_id(conn)
+            row = conn.execute("SELECT quantity FROM free_inventory WHERE account_id = ? AND card_id = ?", (account_id, card_id)).fetchone()
+        else:
+            row = conn.execute("SELECT quantity FROM free_inventory WHERE card_id = ?", (card_id,)).fetchone()
         return int(row["quantity"]) if row else 0
 
     def _set_free_quantity(self, conn: sqlite3.Connection, card_id: int, quantity: int):
-        account_id = self.get_current_account_id(conn)
         quantity = max(0, int(quantity))
-        old_qty = self._get_free_quantity(conn, card_id)
-        conn.execute(
-            """
-            INSERT INTO free_inventory(account_id, card_id, quantity) VALUES (?, ?, ?)
-            ON CONFLICT(account_id, card_id) DO UPDATE SET quantity = excluded.quantity
-            """,
-            (account_id, card_id, quantity),
-        )
+        if self._table_has_column(conn, "free_inventory", "account_id"):
+            account_id = self.get_current_account_id(conn)
+            conn.execute(
+                """
+                INSERT INTO free_inventory(account_id, card_id, quantity) VALUES (?, ?, ?)
+                ON CONFLICT(account_id, card_id) DO UPDATE SET quantity = excluded.quantity
+                """,
+                (account_id, card_id, quantity),
+            )
+        else:
+            conn.execute(
+                """
+                INSERT INTO free_inventory(card_id, quantity) VALUES (?, ?)
+                ON CONFLICT(card_id) DO UPDATE SET quantity = excluded.quantity
+                """,
+                (card_id, quantity),
+            )
 
     def _ensure_sort_order_on_first_add(self, conn: sqlite3.Connection, card_id: int):
         """仅在卡牌首次有库存时（old_qty=0, new_qty>0）自动分配排序。"""
         old_qty = self._get_free_quantity(conn, card_id)
         if old_qty > 0:
             return
-        new_qty_row = conn.execute(
-            "SELECT quantity FROM free_inventory WHERE account_id = ? AND card_id = ?",
-            (self.get_current_account_id(conn), card_id),
-        ).fetchone()
-        if not new_qty_row or int(new_qty_row["quantity"]) <= 0:
+        if self._get_free_quantity(conn, card_id) <= 0:
             return
         card = conn.execute(
-            "SELECT card_type, detail, special_text, product_code, attribute, card_name FROM cards WHERE id = ?",
+            f"SELECT card_type, detail, special_text, product_code, attribute, card_name FROM {self._catalog_cards_table(conn)} WHERE id = ?",
             (card_id,),
         ).fetchone()
         if not card:
@@ -2270,7 +2444,7 @@ class CardRepository:
         if ct not in ("训练家", "支援者", "能量", "宝可梦"):
             return
         rows = conn.execute(
-            "SELECT id, card_type, detail, special_text, card_name, group_sort_order, attribute, product_code FROM cards"
+            f"SELECT c.id, c.card_type, c.detail, c.special_text, c.card_name, COALESCE(hco.sort_order, c.group_sort_order, 0) AS group_sort_order, c.attribute, c.product_code FROM {self._catalog_cards_table(conn)} c LEFT JOIN holdings_card_orders hco ON hco.card_id = c.id"
         ).fetchall()
         self._assign_sort_order(conn, card_id, card, rows)
 
@@ -2320,33 +2494,20 @@ class CardRepository:
                 continue
             if _attribute_sort_index(r["attribute"]) != attr_idx:
                 continue
-            qty = conn.execute(
-                "SELECT quantity FROM free_inventory WHERE account_id = ? AND card_id = ?",
-                (self.get_current_account_id(conn), r["id"]),
-            ).fetchone()
-            if not qty or int(qty["quantity"]) <= 0:
+            if self._get_free_quantity(conn, int(r["id"])) <= 0:
                 continue
             rk = attr_idx * 10000 + _get_release_index(r["product_code"])
             existing.append((r["id"], rk))
 
         if not existing:
-            conn.execute(
-                "UPDATE cards SET group_sort_order = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                (card_id,),
-            )
+            self._set_card_group_sort_order(conn, card_id, 1)
         else:
             existing.sort(key=lambda x: x[1])
             insert_pos = bisect.bisect_right([e[1] for e in existing], sort_key)
             # Shift later cards
             for i in range(insert_pos, len(existing)):
-                conn.execute(
-                    "UPDATE cards SET group_sort_order = group_sort_order + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                    (existing[i][0],),
-                )
-            conn.execute(
-                "UPDATE cards SET group_sort_order = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                (insert_pos + 1, card_id),
-            )
+                self._set_card_group_sort_order(conn, existing[i][0], self._get_card_group_sort_order(conn, existing[i][0]) + 1)
+            self._set_card_group_sort_order(conn, card_id, insert_pos + 1)
 
         # 同时更新 holdings_group_orders：按属性+发售顺序插入组位置
         group_key = build_holdings_group_key(card_category_key, card["card_name"])
@@ -2387,7 +2548,7 @@ class CardRepository:
         target_quantity: int,
     ):
         card_row = conn.execute(
-            "SELECT id, card_name, card_type, detail, special_text FROM cards WHERE id = ?",
+            f"SELECT id, card_name, card_type, detail, special_text FROM {self._catalog_cards_table(conn)} WHERE id = ?",
             (card_id,),
         ).fetchone()
         if card_row is None:
@@ -2400,7 +2561,7 @@ class CardRepository:
         group_key = build_holdings_group_key(category_key, card_row["card_name"])
         display_name = normalize_text(remove_card_name_variants(card_row["card_name"])) or card_row["card_name"]
         candidate_rows = conn.execute(
-            "SELECT id, card_name, card_type, detail, special_text FROM cards"
+            f"SELECT id, card_name, card_type, detail, special_text FROM {self._catalog_cards_table(conn)}"
         ).fetchall()
 
         total_quantity = 0
@@ -2416,8 +2577,7 @@ class CardRepository:
                 total_quantity += self._get_deck_quantity(conn, deck_id, int(row["id"]))
 
         if total_quantity > 4:
-            account_id = self.get_current_account_id(conn)
-            deck_row = conn.execute("SELECT name FROM decks WHERE id = ? AND account_id = ?", (deck_id, account_id)).fetchone()
+            deck_row = conn.execute("SELECT name FROM decks WHERE id = ?", (deck_id,)).fetchone()
             deck_name = deck_row["name"] if deck_row else str(deck_id)
             raise ServiceError(f"卡组“{deck_name}”中的同名卡牌合计不能超过 4 张（基本能量除外）：{display_name}")
 

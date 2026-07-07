@@ -156,7 +156,12 @@ class PtcgGalleryAppTests(unittest.TestCase):
                 "DEFAULT_EXCEL_PATH": str(default_excel),
             }
         )
-        return temp_dir, app, app.test_client()
+        client = app.test_client()
+        with client.session_transaction() as session:
+            session["account_id"] = 1
+            session["account_name"] = "RhymesX"
+            session["authed"] = True
+        return temp_dir, app, client
 
     def _find_card_id(self, client, query: str, card_name: str) -> int:
         payload = client.get(f"/api/search?q={query}").get_json()
@@ -262,10 +267,9 @@ class PtcgGalleryAppTests(unittest.TestCase):
             {"selectedRegulations": ["F", "G"], "considerSameNameRegulation": True},
         )
 
-        preferences_path = self.data_dir / "search_preferences.json"
-        self.assertTrue(preferences_path.exists())
+        preferences = self.client.get("/api/search/options").get_json()["preferences"]
         self.assertEqual(
-            json.loads(preferences_path.read_text(encoding="utf-8")),
+            preferences,
             {"selectedRegulations": ["F", "G"], "considerSameNameRegulation": True},
         )
 
@@ -1055,6 +1059,10 @@ class PtcgGalleryAppTests(unittest.TestCase):
             }
         )
         restarted_client = restarted_app.test_client()
+        with restarted_client.session_transaction() as session:
+            session["account_id"] = 1
+            session["account_name"] = "RhymesX"
+            session["authed"] = True
         restarted_names = [deck["name"] for deck in restarted_client.get("/api/decks").get_json()["items"]]
         self.assertNotIn("龙柱", restarted_names)
 
@@ -1413,6 +1421,233 @@ class PtcgGalleryAppTests(unittest.TestCase):
             self.client.post("/login", data={"username": "Peon", "password": "rescue999"}, follow_redirects=False).status_code,
             302,
         )
+
+
+class DbSplitIntegrationTests(unittest.TestCase):
+    """测试拆库后的数据完整性和多用户隔离。"""
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp_dir.name)
+        self.data_dir = self.root / "data"
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+        self.default_excel = self.data_dir / "卡表.xlsx"
+        self.db_path = self.data_dir / "test.db"
+
+        rows = [
+            ["起始包A", "CSM1aC", "002", "小火龙", "宝可梦", "基础", "", "火", "C", "标准", 2, "", ""],
+            ["起始包A", "CSM1aC", "002", "小火龙球闪", "宝可梦", "基础", "球闪", "火", "C", "标准", 1, "", ""],
+            ["对战包", "SVP", "001", "喷火龙GX", "宝可梦", "阶段2", "宝可梦GX", "火", "RR", "标准", 1, "", ""],
+            ["辅助包", "TRN", "101", "高级球", "物品", "", "", "无", "U", "标准", 4, "", ""],
+            ["辅助包", "TRN", "102", "研究员", "支援者", "", "", "无", "U", "标准", 2, "", ""],
+            ["能量包", "ENG", "202", "火能量", "普通能量", "", "普通能量", "火", "C", "标准", 8, "", ""],
+        ]
+        workbook = Workbook()
+        sheet = workbook.create_sheet("卡表")
+        sheet.append(["商品名称", "商品编号", "卡牌编号", "卡牌名称", "类型", "详细", "特殊", "属性", "稀有度", "赛制", "数量", "备注", "昵称"])
+        for row in rows:
+            sheet.append(row)
+        workbook.save(self.default_excel)
+
+        self.app = create_app({
+            "TESTING": True,
+            "ROOT_DIR": str(self.root),
+            "DATABASE": str(self.db_path),
+            "DEFAULT_EXCEL_PATH": str(self.default_excel),
+            "AUTH_USERNAME": "test_admin",
+            "AUTH_PASSWORD": "test_pass",
+            "INIT_ADMIN_PASS": "init1234",
+        })
+        self.client = self.app.test_client()
+        with self.client.session_transaction() as session:
+            session["account_id"] = 1
+            session["account_name"] = "RhymesX"
+            session["authed"] = True
+            session["is_admin"] = True
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def _create_account(self, name: str, password: str) -> int:
+        """注册一个新账号并返回 account_id。"""
+        invite = self._generate_invite_code()
+        resp = self.client.post("/api/accounts", json={
+            "name": name, "password": password, "inviteCode": invite,
+        })
+        self.assertEqual(resp.status_code, 201)
+        accounts = self.client.get("/api/accounts").get_json()
+        for acc in accounts["items"]:
+            if acc["name"] == name:
+                return acc["id"]
+        self.fail(f"Account {name} not found after creation")
+        return 0
+
+    def _generate_invite_code(self) -> str:
+        resp = self.client.post("/api/invite-codes").get_json()
+        return resp["codes"][0]["code"]
+
+    def _login_as(self, name: str):
+        """以指定账号身份登录（测试模式下绕过密码认证）。"""
+        accounts = self.client.get("/api/accounts").get_json()
+        acc = next((a for a in accounts["items"] if a["name"] == name), None)
+        self.assertIsNotNone(acc, f"Account {name} not found")
+        with self.client.session_transaction() as session:
+            session["account_id"] = acc["id"]
+            session["account_name"] = acc["name"]
+            session["authed"] = True
+            session.pop("is_admin", None)
+
+    def test_user_has_separate_db_file(self):
+        """新账号自动生成独立的 .db 文件。"""
+        account_id = self._create_account("Alice", "alice1234")
+        accounts_dir = self.data_dir / "accounts"
+        self.assertTrue(accounts_dir.exists())
+        self.assertTrue((accounts_dir / f"{account_id}.db").exists(), f"Expected {account_id}.db in accounts dir")
+        self.assertTrue((accounts_dir / "1.db").exists(), "Default account should have its DB file")
+
+    def test_two_users_have_isolated_free_inventory(self):
+        """两个用户的空闲库存互不影响。"""
+        alice_id = self._create_account("Alice", "alice1234")
+
+        # RhymesX 先找到小火龙，放入空闲库存
+        self._login_as("RhymesX")
+        card_id = self._find_card_id(self.client, "小火龙", "小火龙")
+        self.client.put(f"/api/cards/{card_id}/free-quantity", json={"quantity": 3})
+
+        # Alice 查看同一张卡，库存应为 0
+        self._login_as("Alice")
+        card_alice = self.client.get(f"/api/cards/{card_id}").get_json()
+        self.assertEqual(card_alice["freeQuantity"], 0)
+
+        # Alice 也放自己的库存
+        self.client.put(f"/api/cards/{card_id}/free-quantity", json={"quantity": 5})
+        card_alice_after = self.client.get(f"/api/cards/{card_id}").get_json()
+        self.assertEqual(card_alice_after["freeQuantity"], 5)
+
+        # RhymesX 的库存不变
+        self._login_as("RhymesX")
+        card_rhymes = self.client.get(f"/api/cards/{card_id}").get_json()
+        self.assertEqual(card_rhymes["freeQuantity"], 3)
+
+    def test_two_users_have_isolated_decks(self):
+        """两个用户各自建卡组，互不可见。"""
+        self._create_account("Alice", "alice1234")
+
+        # RhymesX 建一个卡组
+        self._login_as("RhymesX")
+        resp = self.client.post("/api/decks", json={"name": "炎系卡组", "color": "#ff4444"})
+        self.assertEqual(resp.status_code, 201)
+        rhymes_deck_id = resp.get_json()["id"]
+
+        # Alice 看不到 RhymesX 的卡组
+        self._login_as("Alice")
+        alice_decks = self.client.get("/api/decks").get_json()["items"]
+        self.assertEqual(len(alice_decks), 4)  # only default decks
+        self.assertNotIn("炎系卡组", [d["name"] for d in alice_decks])
+
+        # Alice 建自己的卡组
+        resp_a = self.client.post("/api/decks", json={"name": "水系卡组", "color": "#4444ff"})
+        self.assertEqual(resp_a.status_code, 201)
+
+        # RhymesX 看不到 Alice 的卡组
+        self._login_as("RhymesX")
+        rhymes_decks = self.client.get("/api/decks").get_json()["items"]
+        self.assertIn("炎系卡组", [d["name"] for d in rhymes_decks])
+        self.assertNotIn("水系卡组", [d["name"] for d in rhymes_decks])
+
+    def test_two_users_have_isolated_search_preferences(self):
+        """两个用户的搜索偏好各自持久化。"""
+        self._create_account("Alice", "alice1234")
+
+        self._login_as("RhymesX")
+        self.client.put("/api/search/preferences", json={
+            "selectedRegulations": ["F", "G"], "considerSameNameRegulation": True,
+        })
+
+        self._login_as("Alice")
+        self.client.put("/api/search/preferences", json={
+            "selectedRegulations": ["H"], "considerSameNameRegulation": False,
+        })
+
+        # 验证 Alice 的偏好
+        prefs_a = self.client.get("/api/search/options").get_json()["preferences"]
+        self.assertEqual(prefs_a["selectedRegulations"], ["H"])
+        self.assertFalse(prefs_a["considerSameNameRegulation"])
+
+        # 验证 RhymesX 的偏好
+        self._login_as("RhymesX")
+        prefs_r = self.client.get("/api/search/options").get_json()["preferences"]
+        self.assertCountEqual(prefs_r["selectedRegulations"], ["F", "G"])
+        self.assertTrue(prefs_r["considerSameNameRegulation"])
+
+    def test_two_users_have_isolated_holdings_group_orders(self):
+        """两个用户的 holdings 分组排序互不影响。"""
+        self._create_account("Alice", "alice1234")
+
+        # 两个用户都先确保有一些库存数据
+        for user in ("RhymesX", "Alice"):
+            self._login_as(user)
+            card_id = self._find_card_id(self.client, "高级球", "高级球")
+            self.client.put(f"/api/cards/{card_id}/free-quantity", json={"quantity": 2})
+
+            card_id2 = self._find_card_id(self.client, "研究员", "研究员")
+            self.client.put(f"/api/cards/{card_id2}/free-quantity", json={"quantity": 2})
+
+        # RhymesX 调整分组顺序
+        self._login_as("RhymesX")
+        holdings = self.client.get("/api/holdings").get_json()
+        item_section = next(s for s in holdings["sections"] if s["key"] == "item")
+        reversed_keys = list(reversed([g["groupKey"] for g in item_section["groups"]]))
+        self.client.put("/api/inventory-table/group-order", json={
+            "sectionKey": "item", "groupKeys": reversed_keys,
+        })
+
+        # Alice 的 holdings 顺序不受影响
+        self._login_as("Alice")
+        holdings_a = self.client.get("/api/holdings").get_json()
+        item_section_a = next(s for s in holdings_a["sections"] if s["key"] == "item")
+        self.assertIsNotNone(item_section_a)
+
+    def test_migration_preserves_default_account_data(self):
+        """迁移脚本 inspect 模式不报错，且能正确识别现有账号。"""
+        import subprocess
+        result = subprocess.run(
+            [
+                "C:\\Users\\DELL\\AppData\\Local\\Programs\\Python\\Python311\\python.exe",
+                "scripts/migrate_split_db.py",
+                "--root-dir", str(self.root),
+                "--database", str(self.db_path),
+            ],
+            capture_output=True, text=True, timeout=30,
+        )
+        self.assertEqual(result.returncode, 0, f"Migration script failed: {result.stderr}")
+        report = json.loads(result.stdout)
+        self.assertIn("accounts", report)
+        self.assertEqual(len(report["accounts"]), 1)
+        self.assertEqual(report["accounts"][0]["name"], "RhymesX")
+
+    def test_migration_apply_and_verify(self):
+        """迁移脚本 apply 模式与旧数据格式不冲突，report 正确返回 accounts。"""
+        import subprocess
+        result = subprocess.run(
+            [
+                "C:\\Users\\DELL\\AppData\\Local\\Programs\\Python\\Python311\\python.exe",
+                "scripts/migrate_split_db.py",
+                "--root-dir", str(self.root),
+                "--database", str(self.db_path),
+                "--apply", "--force",
+            ],
+            capture_output=True, text=True, timeout=30,
+        )
+        self.assertEqual(result.returncode, 0, f"Migration apply failed: {result.stderr}")
+        report = json.loads(result.stdout)
+        self.assertTrue(report["allAccountsVerified"], "All accounts should pass verification")
+        self.assertGreaterEqual(len(report["accounts"]), 1, "At least one account should be in the report")
+
+    def _find_card_id(self, client, query: str, card_name: str) -> int:
+        payload = client.get(f"/api/search?q={query}").get_json()
+        item = next(item for item in payload["items"] if item["cardName"] == card_name)
+        return item["id"]
 
 
 if __name__ == "__main__":

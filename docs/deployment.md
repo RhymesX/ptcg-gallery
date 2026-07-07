@@ -147,6 +147,47 @@ cd /opt/ptcgGalleryWeb
 # 看到启动日志即成功，Ctrl+C 退出
 ```
 
+### 5.6 拆库迁移上线步骤
+
+当代码已经包含“共享目录库 + 用户独立业务库”的完整实现后，可以用下面的步骤在服务器上执行正式拆库。
+
+先停服务，避免迁移期间仍有写入：
+
+```bash
+systemctl stop ptcggallery
+systemctl status ptcggallery
+```
+
+先做只读检查，生成一份迁移前报告：
+
+```bash
+cd /opt/ptcgGalleryWeb
+.venv/bin/python scripts/migrate_split_db.py \
+    --report-path /opt/ptcgGalleryWeb/data/backups/db-split-inspect.json
+```
+
+确认输出里的 `accounts`、`legacy` 统计和目标路径无误后，再执行正式迁移：
+
+```bash
+cd /opt/ptcgGalleryWeb
+.venv/bin/python scripts/migrate_split_db.py --apply
+```
+
+说明：
+
+1. 该脚本会先在 `data/backups/` 下自动备份 `ptcg_gallery.db`、`search_preferences.json`、`auth.json`，并写出迁移报告。
+2. 正式迁移会为每个账号生成 `data/accounts/{account_id}.db`。
+3. 如果目标账号库文件已经存在，脚本会默认停止，防止误覆盖。只有确认需要重建时才加 `--force`。
+
+迁移完成后，先检查生成的报告，再启动服务：
+
+```bash
+systemctl start ptcggallery
+systemctl status ptcggallery
+```
+
+如果迁移后发现问题，不要立即删除旧主库中的旧用户数据表，优先回滚代码并使用 `data/backups/` 下的备份文件恢复。
+
 ---
 
 ## 六、配置 systemd 服务（开机自启）

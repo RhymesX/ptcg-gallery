@@ -91,12 +91,12 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
         app.config.update(test_config)
         if test_config.get("DATABASE"):
             paths = build_paths(app.config["ROOT_DIR"])
-            paths = AppPaths(paths.root_dir, paths.data_dir, Path(app.config["DATABASE"]), paths.default_excel_path)
+            paths = AppPaths(paths.root_dir, paths.data_dir, Path(app.config["DATABASE"]), paths.accounts_dir, paths.default_excel_path)
         if test_config.get("DEFAULT_EXCEL_PATH"):
-            paths = AppPaths(paths.root_dir, paths.data_dir, paths.db_path, Path(app.config["DEFAULT_EXCEL_PATH"]))
+            paths = AppPaths(paths.root_dir, paths.data_dir, paths.db_path, paths.accounts_dir, Path(app.config["DEFAULT_EXCEL_PATH"]))
 
     database_exists = Path(app.config["DATABASE"]).exists()
-    repository = CardRepository(app.config["DATABASE"])
+    repository = CardRepository(app.config["DATABASE"], accounts_dir=paths.accounts_dir)
     repository.set_init_admin_pass(app.config["INIT_ADMIN_PASS"])
     if not database_exists:
         repository.ensure_default_decks()
@@ -144,6 +144,10 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
             return redirect(url_for("login_page", next=request.full_path))
         repository.set_request_account_id(int(account["id"]))
         return None
+
+    @app.teardown_request
+    def _clear_request_account(_exc: BaseException | None):
+        repository.clear_request_account_id()
 
     @app.get("/login")
     def login_page():
