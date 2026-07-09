@@ -95,6 +95,16 @@
                         <p id="inviteEmptyMsg">暂无有效邀请码</p>
                     </div>
                     <p class="status-line" id="inviteStatus" style="margin:4px 0 0;"></p>
+                    <div style="margin-top:8px;display:flex;align-items:center;gap:8px;">
+                        <span style="font-size:12px;color:var(--muted);">注册邀请码开关</span>
+                        <button id="toggleInviteBtn" type="button" style="font-size:12px;">加载中...</button>
+                    </div>
+                </div>
+
+                <div style="border-top:1px solid var(--border);padding-top:8px;margin-top:4px;">
+                    <label class="field-label" style="margin-bottom:6px;">微信小程序绑定</label>
+                    <button id="generateBindCodeBtn" type="button" style="flex:1;">生成绑定码</button>
+                    <p class="status-line" id="bindCodeStatus" style="margin:4px 0 0;display:none;"></p>
                 </div>
 
                 <p class="status-line" id="accountStatus">在登录页注册新账号，改密请点击右上角按钮。</p>

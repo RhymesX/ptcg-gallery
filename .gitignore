@@ -37,7 +37,6 @@ __pycache__/
 ### ptcgGallery ###
 # 卡图缓存（服务器自己下载）
 data/card_images/
-data/card_images_user/
 # 本地数据 / 运行产物
 data/**/*.db
 data/**/*.xlsx
@@ -53,3 +52,6 @@ data/**/*.json
 # Claude Code 项目辅助文件（不上传服务器）
 CLAUDE.md
 .claude/
+
+# 微信小程序开发者工具私有配置
+miniprogram/project.private.config.json

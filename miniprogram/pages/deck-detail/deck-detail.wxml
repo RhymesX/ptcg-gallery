@@ -1,0 +1,72 @@
+<view class="page">
+  <view class="header">
+    <view class="page-title">{{deck.name || '卡组详情'}}</view>
+    <view class="deck-summary" wx:if="{{deck}}">
+      {{deck.mainCardCount || 0}}张卡 · {{energyCount}}张能量 · 备卡{{deck.backupCardCount || 0}}张
+    </view>
+    <view wx:if="{{deck && deck.deckChecks && deck.deckChecks.items}}" class="deck-warn-area">
+      <view wx:for="{{deck.deckChecks.items}}" wx:key="key" class="deck-warning">
+        {{item.message}}
+      </view>
+    </view>
+    <view class="view-toggle">
+      <view class="toggle-btn {{viewMode === 'text' ? 'active' : ''}}" bindtap="switchToText">文字</view>
+      <view class="toggle-btn {{viewMode === 'image' ? 'active' : ''}}" bindtap="switchToImage">图片</view>
+    </view>
+  </view>
+
+  <!-- 文字模式 -->
+  <scroll-view scroll-y class="content" wx:if="{{!loading && viewMode === 'text'}}">
+    <view class="text-layout">
+      <view class="text-column">
+        <block wx:for="{{leftSections}}" wx:key="key" wx:for-item="section">
+          <view class="section-title">{{section.title}}</view>
+          <view class="text-card-row" wx:for="{{section.items}}" wx:key="deckSectionEntryKey" wx:for-item="item">
+            <text class="text-card-qty">{{item.deckQuantity || 0}}</text>
+            <text class="text-card-name" data-card-id="{{item.id}}" bindtap="onCardTap">{{item.cardName}}</text>
+            <text class="text-card-code">{{item.displayCode || ''}}</text>
+          </view>
+        </block>
+      </view>
+      <view class="text-column">
+        <block wx:for="{{rightSections}}" wx:key="key" wx:for-item="section">
+          <view class="section-title">{{section.title}}</view>
+          <view class="text-card-row" wx:for="{{section.items}}" wx:key="deckSectionEntryKey" wx:for-item="item">
+            <text class="text-card-qty">{{item.deckQuantity || 0}}</text>
+            <text class="text-card-name" data-card-id="{{item.id}}" bindtap="onCardTap">{{item.cardName}}</text>
+            <text class="text-card-code">{{item.displayCode || ''}}</text>
+          </view>
+        </block>
+      </view>
+    </view>
+    <block wx:for="{{fullSections}}" wx:key="key" wx:for-item="section">
+      <view class="section-title">{{section.title}}</view>
+      <view class="text-card-row" wx:for="{{section.items}}" wx:key="deckSectionEntryKey" wx:for-item="item">
+        <text class="text-card-qty">{{item.deckQuantity || 0}}</text>
+        <text class="text-card-name" data-card-id="{{item.id}}" bindtap="onCardTap">{{item.cardName}}</text>
+        <text class="text-card-code">{{item.displayCode || ''}}</text>
+      </view>
+    </block>
+    <view wx:if="{{sections.length === 0}}" class="empty">暂无卡牌</view>
+  </scroll-view>
+
+  <!-- 图片模式 -->
+  <scroll-view scroll-y class="content" wx:if="{{!loading && viewMode === 'image'}}">
+    <view class="image-grid">
+      <view class="image-card" wx:for="{{imageCards}}" wx:key="deckSectionEntryKey" wx:for-item="item" data-card-id="{{item.id}}" bindtap="onCardTap">
+        <image class="image-card-img" src="{{item.imageUrl || ''}}" mode="aspectFit" />
+        <view class="image-card-qty">{{item.deckQuantity || 0}}</view>
+      </view>
+    </view>
+    <view wx:if="{{imageCards.length === 0}}" class="empty">暂无卡牌</view>
+  </scroll-view>
+
+  <view wx:if="{{loading}}" class="loading">加载中...</view>
+
+  <view class="navbar">
+    <view class="nav-item" bindtap="goToSearch"><text class="nav-icon">🔍</text><text>搜索</text></view>
+    <view class="nav-item" bindtap="goToHoldings"><text class="nav-icon">📦</text><text>仓库</text></view>
+    <view class="nav-item active"><text class="nav-icon">🗃</text><text>卡组</text></view>
+    <view class="nav-item" bindtap="goToProfile"><text class="nav-icon">👤</text><text>我的</text></view>
+  </view>
+</view>

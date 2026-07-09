@@ -1,0 +1,55 @@
+<view class="page">
+  <view class="header">
+    <view class="page-title">我的卡组</view>
+    <button class="create-btn" size="mini" type="primary" bindtap="showCreate">+ 新建卡组</button>
+  </view>
+
+  <scroll-view scroll-y class="content">
+    <block wx:for="{{decks}}" wx:key="id">
+      <view class="deck-row">
+        <view class="deck-main" bindtap="onDeckTap" data-deck-id="{{item.id}}">
+          <view class="deck-color" style="background:{{item.color || '#9ca3af'}}"></view>
+          <view class="deck-info">
+            <view class="deck-name">{{item.name}}</view>
+            <view class="deck-meta">
+              {{item.cardCount || 0}}张卡
+            </view>
+          </view>
+        </view>
+        <view class="deck-delete" data-deck-id="{{item.id}}" bindtap="onDeleteDeck">🗑</view>
+      </view>
+    </block>
+    <view wx:if="{{decks.length === 0}}" class="empty">暂无卡组，点击上方按钮创建</view>
+  </scroll-view>
+
+  <view class="modal" wx:if="{{showCreateModal}}">
+    <view class="modal-mask" bindtap="hideCreate"></view>
+    <view class="modal-content">
+      <view class="modal-title">新建卡组</view>
+      <input class="deck-name-input" placeholder="卡组名称" value="{{newDeckName}}" bindinput="onNameInput" />
+      <view class="modal-actions">
+        <button size="mini" type="primary" bindtap="onCreateDeck">创建</button>
+        <button size="mini" bindtap="hideCreate">取消</button>
+      </view>
+    </view>
+  </view>
+
+  <view class="navbar">
+    <view class="nav-item" bindtap="goToSearch">
+      <text class="nav-icon">🔍</text>
+      <text>搜索</text>
+    </view>
+    <view class="nav-item" bindtap="goToHoldings">
+      <text class="nav-icon">📦</text>
+      <text>仓库</text>
+    </view>
+    <view class="nav-item active">
+      <text class="nav-icon">🗃</text>
+      <text>卡组</text>
+    </view>
+    <view class="nav-item" bindtap="goToProfile">
+      <text class="nav-icon">👤</text>
+      <text>我的</text>
+    </view>
+  </view>
+</view>

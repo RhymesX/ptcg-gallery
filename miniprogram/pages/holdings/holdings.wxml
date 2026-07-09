@@ -1,0 +1,88 @@
+<view class="page">
+  <view class="header">
+    <view class="page-title">我的仓库</view>
+    <view class="search-row">
+      <input class="search-input" placeholder="搜索卡牌..." value="{{searchText}}" bindinput="onSearchInput" confirm-type="search" />
+      <view class="search-clear" wx:if="{{searchText}}" catchtap="onClearSearch">✕</view>
+    </view>
+    <view class="filter-btn-row" wx:if="{{filterKeys.length > 1}}">
+      <view class="filter-btn" bindtap="showFilterPicker">
+        <text>{{categoryFilters.length > 0 ? '已选 ' + categoryFilters.length + ' 项' : '全部类型'}}</text>
+        <text class="filter-arrow">▾</text>
+      </view>
+    </view>
+  </view>
+
+  <scroll-view scroll-y class="content" wx:if="{{!loading}}">
+    <block wx:for="{{sections}}" wx:key="key" wx:for-item="section">
+      <view class="section-title">{{section.title}}</view>
+      <block wx:for="{{section.groups}}" wx:key="groupKey" wx:for-item="group">
+        <view class="group-label">{{group.groupName}}（{{group.items.length}}种，共{{group.totalQuantity}}张）</view>
+        <block wx:for="{{group.items}}" wx:key="id" wx:for-item="card">
+          <view class="card-row {{card.isFolded ? 'folded' : ''}}" data-card-id="{{card.id}}" data-first-card-id="{{card.firstCardId || ''}}" bindtap="onCardTap">
+            <image wx:if="{{showImages}}" class="card-image" src="{{card.imageUrl || ''}}" mode="aspectFit" />
+            <view class="card-info">
+              <view class="card-name">{{card.cardName}}</view>
+              <view class="card-meta">{{card.displayCode || ''}}</view>
+              <view class="card-deck-tags" wx:if="{{card.deckQuantities && !card.isFolded}}">
+                <text class="tag-free">空闲 {{card.freeQuantity || 0}}</text>
+                <block wx:for="{{deckNames}}" wx:key="*this" wx:for-item="dn">
+                  <text wx:if="{{card.deckQuantities[dn] > 0}}" class="tag-deck" style="background:{{deckColors[dn]}}22;color:{{deckColors[dn]}};">{{dn}} {{card.deckQuantities[dn]}}</text>
+                </block>
+              </view>
+              <view class="card-deck-tags" wx:elif="{{card.isFolded}}">
+                <text class="tag-free">空闲 {{card.freeQuantity || 0}}</text>
+                <block wx:for="{{deckNames}}" wx:key="*this" wx:for-item="dn">
+                  <text wx:if="{{card.deckQuantities[dn] > 0}}" class="tag-deck" style="background:{{deckColors[dn]}}22;color:{{deckColors[dn]}};">{{dn}} {{card.deckQuantities[dn]}}</text>
+                </block>
+              </view>
+            </view>
+            <view class="card-quantity">{{card.ownedQuantity || 0}}</view>
+          </view>
+        </block>
+      </block>
+    </block>
+    <view wx:if="{{sections.length === 0}}" class="empty">暂无卡牌</view>
+  </scroll-view>
+
+  <view wx:if="{{loading}}" class="loading">加载中...</view>
+
+  <view class="navbar">
+    <view class="nav-item" bindtap="goToSearch">
+      <text class="nav-icon">🔍</text>
+      <text>搜索</text>
+    </view>
+    <view class="nav-item active">
+      <text class="nav-icon">📦</text>
+      <text>仓库</text>
+    </view>
+    <view class="nav-item" bindtap="goToDecks">
+      <text class="nav-icon">🗃</text>
+      <text>卡组</text>
+    </view>
+    <view class="nav-item" bindtap="goToProfile">
+      <text class="nav-icon">👤</text>
+      <text>我的</text>
+    </view>
+  </view>
+
+  <view class="filter-overlay" wx:if="{{showFilterPicker}}" bindtap="hideFilterPicker">
+    <view class="filter-modal" catchtap="">
+      <view class="filter-modal-title">选择类型</view>
+      <view class="filter-modal-options">
+        <view
+          class="filter-modal-option {{categoryFilters.length === 0 ? 'active' : ''}}"
+          bindtap="onFilterClearAll"
+        >全部</view>
+        <view
+          wx:for="{{filterKeys}}"
+          wx:key="key"
+          wx:for-item="fk"
+          class="filter-modal-option {{fk.active ? 'active' : ''}}"
+          data-key="{{fk.key}}"
+          bindtap="onFilterPickerSelect"
+        >{{fk.title}}</view>
+      </view>
+    </view>
+  </view>
+</view>

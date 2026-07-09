@@ -1,0 +1,51 @@
+.tab-row {
+  display: flex;
+  gap: 16rpx;
+  margin-bottom: 40rpx;
+}
+
+.tab-btn {
+  flex: 1;
+  text-align: center;
+  padding: 16rpx 0;
+  font-size: 28rpx;
+  border-radius: 12rpx;
+  background: #1a1a3e;
+  color: #9ca3af;
+  transition: all 0.2s;
+}
+
+.tab-active {
+  background: #f5b700;
+  color: #0f0f23;
+  font-weight: bold;
+}
+
+.code-input {
+  width: 500rpx;
+  padding: 24rpx;
+  text-align: center;
+  font-size: 36rpx;
+  letter-spacing: 8rpx;
+  background: #252550;
+  border-radius: 12rpx;
+  color: #f5b700;
+  margin: 0 auto 16rpx;
+}
+
+.bind-input {
+  font-size: 48rpx;
+  letter-spacing: 16rpx;
+  width: 400rpx;
+}
+
+.submit-btn {
+  margin-top: 40rpx;
+  width: 400rpx;
+}
+
+.error-msg {
+  color: #ef4444;
+  font-size: 26rpx;
+  text-align: center;
+}

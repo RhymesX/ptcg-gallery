@@ -154,14 +154,14 @@ class ImageService:
         """非阻塞。缓存命中 → URL；未命中且下载启用 → 入队 → None；下载关闭 → None。"""
         key = self._key(card_name, pc, cc)
 
-        # 1) 本地缓存
-        if _find_file(self.cache_dir, key):
-            return f"/api/images/{key}"
-
-        # 2) 用户本地文件
+        # 1) 用户本地文件（优先级最高，可覆盖 CDN 缓存）
         uf = self._user_file(card_name, pc, cc)
         if uf:
             return uf
+
+        # 2) 本地缓存
+        if _find_file(self.cache_dir, key):
+            return f"/api/images/{key}"
 
         # 3) 负缓存
         if self._neg(key):
@@ -172,14 +172,6 @@ class ImageService:
             return None
 
         # 5) 入队（按需下载）
-        self._enqueue(key, card_name, pc, cc)
-        return None
-
-        # 3) 负缓存
-        if self._neg(key):
-            return None
-
-        # 4) 入队
         self._enqueue(key, card_name, pc, cc)
         return None
 

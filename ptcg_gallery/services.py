@@ -218,6 +218,7 @@ CREATE TABLE IF NOT EXISTS accounts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE,
     password_hash TEXT NOT NULL DEFAULT '',
+    wx_openid TEXT NOT NULL DEFAULT '',
     sort_order INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -474,6 +475,7 @@ class CardRepository:
             self._ensure_deck_sort_order_column(conn)
             self._ensure_deck_card_backup_quantity_column(conn)
             self._ensure_account_password_hash_column(conn)
+            self._ensure_account_wx_openid_column(conn)
             self._ensure_account_storage(conn)
             self._normalize_supporter_wording(conn)
             self._normalize_deck_sort_order(conn)
@@ -503,6 +505,11 @@ class CardRepository:
         columns = {row[1] for row in conn.execute("PRAGMA table_info(accounts)").fetchall()}
         if "password_hash" not in columns:
             conn.execute("ALTER TABLE accounts ADD COLUMN password_hash TEXT NOT NULL DEFAULT ''")
+
+    def _ensure_account_wx_openid_column(self, conn: sqlite3.Connection):
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(accounts)").fetchall()}
+        if "wx_openid" not in columns:
+            conn.execute("ALTER TABLE accounts ADD COLUMN wx_openid TEXT NOT NULL DEFAULT ''")
 
     def _ensure_default_account_password(self, conn: sqlite3.Connection):
         if not self._init_admin_pass:
@@ -798,6 +805,40 @@ class CardRepository:
             self._ensure_default_decks_for_account(account_conn)
         return self.list_accounts()
 
+    def create_wechat_account(self, name: str, openid: str) -> dict[str, Any]:
+        """为微信小程序用户创建无密码账号（通过 wx_openid 绑定）。"""
+        clean_name = normalize_text(name)
+        if not clean_name:
+            raise ServiceError("账号名称不能为空")
+        with self.connect_catalog() as conn:
+            existing = conn.execute("SELECT id FROM accounts WHERE name = ?", (clean_name,)).fetchone()
+            if existing is not None:
+                clean_name = f"{clean_name}_{openid[-4:]}"
+            try:
+                next_sort = conn.execute("SELECT COALESCE(MAX(sort_order), 0) + 1 FROM accounts").fetchone()[0]
+                cursor = conn.execute(
+                    "INSERT INTO accounts(name, password_hash, wx_openid, sort_order, updated_at) VALUES (?, '', ?, ?, CURRENT_TIMESTAMP)",
+                    (clean_name, openid, next_sort),
+                )
+            except sqlite3.IntegrityError as exc:
+                raise ConflictError('账号"{}"已存在'.format(clean_name)) from exc
+            account_id = int(cursor.lastrowid)
+        self._init_account_db(account_id)
+        with self.connect_account(account_id) as account_conn:
+            self._ensure_default_decks_for_account(account_conn)
+        return {"id": account_id, "name": clean_name}
+
+    def get_account_by_wx_openid(self, openid: str) -> dict[str, Any] | None:
+        """根据微信 openid 查找已绑定的账号。"""
+        if not openid:
+            return None
+        with self.connect_catalog() as conn:
+            row = conn.execute(
+                "SELECT id, name FROM accounts WHERE wx_openid = ?",
+                (openid,),
+            ).fetchone()
+        return dict(row) if row is not None else None
+
     def switch_account(self, account_id: int) -> dict[str, Any]:
         with self.connect_catalog() as conn:
             row = conn.execute("SELECT id FROM accounts WHERE id = ?", (int(account_id),)).fetchone()
@@ -894,6 +935,68 @@ class CardRepository:
                 (code,),
             )
         return self.list_invite_codes()
+
+    def create_bind_code(self, account_id: int) -> str:
+        """生成 6 位绑定码（5 分钟有效），供已登录 Web 用户绑定微信小程序使用。"""
+        import random
+        code = str(random.randint(100000, 999999))
+        expires_at = str(int(__import__('time').time()) + 300)
+        with self.connect_catalog() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO app_settings(key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)",
+                (f"bind_code:{code}", f"{int(account_id)}|{expires_at}"),
+            )
+        return code
+
+    def consume_bind_code(self, code: str) -> int | None:
+        """校验绑定码是否有效，有效则返回 account_id 并删除该码。返回 None 表示无效或过期。"""
+        clean_code = normalize_text(code)
+        if not clean_code:
+            return None
+        with self.connect_catalog() as conn:
+            row = conn.execute(
+                "SELECT value FROM app_settings WHERE key = ?",
+                (f"bind_code:{clean_code}",),
+            ).fetchone()
+            if row is None:
+                return None
+            parts = (row["value"] or "").split("|")
+            if len(parts) != 2:
+                return None
+            account_id = int(parts[0])
+            expires_at = int(parts[1])
+            if int(__import__('time').time()) > expires_at:
+                conn.execute("DELETE FROM app_settings WHERE key = ?", (f"bind_code:{clean_code}",))
+                return None
+            conn.execute("DELETE FROM app_settings WHERE key = ?", (f"bind_code:{clean_code}",))
+            return account_id
+
+    def bind_wx_openid(self, account_id: int, openid: str) -> None:
+        """将微信 openid 绑定到指定账号。"""
+        with self.connect_catalog() as conn:
+            conn.execute(
+                "UPDATE accounts SET wx_openid = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (openid, int(account_id)),
+            )
+
+    def is_invite_required(self) -> bool:
+        """读取注册邀请码开关，不存在时默认开启（返回 True）。"""
+        with self.connect_catalog() as conn:
+            row = conn.execute(
+                "SELECT value FROM app_settings WHERE key = 'registration.require_invite'"
+            ).fetchone()
+            if row is None:
+                return True
+            return normalize_text(row["value"]).lower() in ("true", "1", "yes", "on")
+
+    def set_invite_required(self, required: bool) -> None:
+        """设置注册邀请码开关。"""
+        value = "true" if required else "false"
+        with self.connect_catalog() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO app_settings(key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)",
+                ("registration.require_invite", value),
+            )
 
     def list_invite_codes(self) -> dict[str, Any]:
         """列出所有未使用的邀请码及其过期时间。"""

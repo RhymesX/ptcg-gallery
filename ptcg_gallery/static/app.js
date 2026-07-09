@@ -44,6 +44,8 @@ const elements = {
     invitePanel: document.getElementById('invitePanel'),
     generateInviteBtn: document.getElementById('generateInviteBtn'),
     inviteCodeList: document.getElementById('inviteCodeList'),
+    generateBindCodeBtn: document.getElementById('generateBindCodeBtn'),
+    bindCodeStatus: document.getElementById('bindCodeStatus'),
     inviteEmptyMsg: document.getElementById('inviteEmptyMsg'),
     inviteStatus: document.getElementById('inviteStatus'),
     importDefaultCatalogBtn: document.getElementById('importDefaultCatalogBtn'),
@@ -240,6 +242,7 @@ function renderAccounts(payload) {
     }
     if (state.isAdmin) {
         loadInviteCodes();
+        loadInviteSetting();
     }
 }
 
@@ -282,6 +285,56 @@ async function generateInviteCode() {
         setStatus(elements.inviteStatus, error.message, 'warning');
     }
 }
+
+async function generateBindCode() {
+    try {
+        const data = await api('/api/account/bind-code', { method: 'POST' });
+        const codeEl = document.getElementById('bindCodeStatus');
+        if (codeEl) {
+            codeEl.style.display = 'block';
+            codeEl.textContent = '绑定码：' + data.code + '（5 分钟内有效，请在微信小程序中输入）';
+            codeEl.style.color = 'var(--success)';
+        }
+        setTimeout(() => {
+            if (codeEl) {
+                codeEl.style.display = 'none';
+                codeEl.textContent = '';
+            }
+        }, 300000); // 5 分钟后自动隐藏
+    } catch (error) {
+        setStatus(elements.bindCodeStatus, error.message, 'warning');
+    }
+}
+
+async function loadInviteSetting() {
+    const btn = document.getElementById('toggleInviteBtn');
+    if (!btn) return;
+    try {
+        const data = await api('/api/settings/registration');
+        btn.textContent = data.requireInvite ? '已开启（点击关闭）' : '已关闭（点击开启）';
+        btn.className = data.requireInvite ? 'danger' : '';
+        btn.dataset.enabled = data.requireInvite ? '1' : '0';
+    } catch (e) {
+        btn.textContent = '获取失败';
+    }
+}
+
+async function toggleInviteRequired() {
+    const btn = document.getElementById('toggleInviteBtn');
+    if (!btn) return;
+    const current = btn.dataset.enabled === '1';
+    try {
+        await api('/api/settings/registration', { method: 'PUT', body: { requireInvite: !current } });
+        await loadInviteSetting();
+    } catch (error) {
+        alert('操作失败：' + error.message);
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const btn = document.getElementById('toggleInviteBtn');
+    if (btn) btn.addEventListener('click', toggleInviteRequired);
+});
 
 // ── 改密弹窗 ───────────────────────────────────────────
 
@@ -923,6 +976,7 @@ elements.adminResetPasswordInput?.addEventListener('keydown', (event) => {
 });
 elements.generateInviteBtn?.addEventListener('click', generateInviteCode);
 elements.adminDeleteAccountBtn?.addEventListener('click', adminDeleteAccount);
+elements.generateBindCodeBtn?.addEventListener('click', generateBindCode);
 
 if (elements.deckForm) {
     elements.deckForm.addEventListener('submit', async (event) => {

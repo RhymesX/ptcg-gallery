@@ -1,0 +1,134 @@
+.page-title {
+  font-size: 36rpx;
+  font-weight: bold;
+}
+
+.content {
+  padding-bottom: 120rpx;
+}
+
+.search-row {
+  display: flex;
+  align-items: center;
+  margin-top: 12rpx;
+  position: relative;
+}
+
+.search-input {
+  flex: 1;
+  background: #252550;
+  border-radius: 12rpx;
+  padding: 14rpx 20rpx;
+  color: #e0e0e0;
+  font-size: 28rpx;
+}
+
+.search-clear {
+  position: absolute;
+  right: 16rpx;
+  width: 40rpx;
+  height: 40rpx;
+  line-height: 40rpx;
+  text-align: center;
+  color: #9ca3af;
+  font-size: 28rpx;
+}
+
+.filter-btn-row {
+  margin-top: 12rpx;
+}
+
+.filter-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12rpx 20rpx;
+  border-radius: 12rpx;
+  background: #252550;
+  font-size: 26rpx;
+  color: #e0e0e0;
+}
+
+.filter-arrow {
+  font-size: 24rpx;
+  color: #9ca3af;
+}
+
+.filter-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.filter-modal {
+  width: 560rpx;
+  max-height: 70vh;
+  background: #1a1a2e;
+  border-radius: 20rpx;
+  padding: 30rpx;
+}
+
+.filter-modal-title {
+  font-size: 32rpx;
+  font-weight: bold;
+  margin-bottom: 20rpx;
+  text-align: center;
+}
+
+.filter-modal-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16rpx;
+}
+
+.filter-modal-option {
+  padding: 12rpx 24rpx;
+  border-radius: 12rpx;
+  font-size: 26rpx;
+  background: #252550;
+  color: #9ca3af;
+}
+
+.filter-modal-option.active {
+  background: #f5b700;
+  color: #1a1a2e;
+}
+
+.group-label {
+  font-size: 26rpx;
+  color: #9ca3af;
+  padding: 8rpx 30rpx;
+  background: #141428;
+}
+
+.card-row.folded {
+  border-left: 4rpx solid #f5b700;
+}
+
+.card-deck-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8rpx;
+  margin-top: 8rpx;
+}
+
+.tag-free {
+  font-size: 22rpx;
+  background: #1a3a2e;
+  color: #4ade80;
+  padding: 4rpx 12rpx;
+  border-radius: 8rpx;
+}
+
+.tag-deck {
+  font-size: 22rpx;
+  padding: 4rpx 12rpx;
+  border-radius: 8rpx;
+}

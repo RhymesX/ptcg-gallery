@@ -1,0 +1,20 @@
+{
+  "pages": [
+    "pages/login/login",
+    "pages/invite/invite",
+    "pages/search/search",
+    "pages/card-detail/card-detail",
+    "pages/holdings/holdings",
+    "pages/decks/decks",
+    "pages/deck-detail/deck-detail",
+    "pages/profile/profile"
+  ],
+  "window": {
+    "navigationBarTitleText": "PTCG 卡牌收藏",
+    "navigationBarBackgroundColor": "#1a1a2e",
+    "navigationBarTextStyle": "white",
+    "backgroundColor": "#0f0f23"
+  },
+  "style": "v2",
+  "sitemapLocation": "sitemap.json"
+}

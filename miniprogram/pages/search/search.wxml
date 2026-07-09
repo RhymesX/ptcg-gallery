@@ -1,0 +1,61 @@
+<view class="search-page">
+  <view class="header">
+    <view class="search-box">
+      <input
+        class="search-input"
+        placeholder="搜索卡牌名称或编号..."
+        placeholder-style="color:#6b7280"
+        value="{{query}}"
+        bindinput="onSearchInput"
+        bindconfirm="doSearch"
+        confirm-type="search"
+      />
+      <button class="search-btn" size="mini" type="primary" bindtap="doSearch">搜索</button>
+    </view>
+    <view class="regulation-bar" wx:if="{{regulations.length > 0}}">
+      <block wx:for="{{regulations}}" wx:key="*this">
+        <view
+          class="reg-tag {{selectedRegulations.indexOf(item) >= 0 ? 'active' : ''}}"
+          data-regulation="{{item}}"
+          bindtap="onRegulationToggle"
+        >{{item === '' ? '无' : item}}</view>
+      </block>
+    </view>
+  </view>
+
+  <scroll-view scroll-y class="card-list">
+    <view wx:if="{{searching}}" class="loading">搜索中...</view>
+    <view wx:elif="{{results.length === 0}}" class="empty">输入关键词开始搜索</view>
+    <block wx:for="{{results}}" wx:key="id">
+      <view class="card-row" data-card-id="{{item.id}}" bindtap="onCardTap">
+        <image class="card-image" src="{{item.imageUrl || ''}}" mode="aspectFit" />
+        <view class="card-info">
+          <view class="card-name">{{item.cardName}}</view>
+          <view class="card-meta">
+            {{item.productCode}} {{item.cardCode}} {{item.rarity || ''}}
+          </view>
+        </view>
+        <view class="card-quantity">{{item.freeQuantity || 0}}</view>
+      </view>
+    </block>
+  </scroll-view>
+
+  <view class="navbar">
+    <view class="nav-item active">
+      <text class="nav-icon">🔍</text>
+      <text>搜索</text>
+    </view>
+    <view class="nav-item" bindtap="goToHoldings">
+      <text class="nav-icon">📦</text>
+      <text>仓库</text>
+    </view>
+    <view class="nav-item" bindtap="goToDecks">
+      <text class="nav-icon">🗃</text>
+      <text>卡组</text>
+    </view>
+    <view class="nav-item" bindtap="goToProfile">
+      <text class="nav-icon">👤</text>
+      <text>我的</text>
+    </view>
+  </view>
+</view>

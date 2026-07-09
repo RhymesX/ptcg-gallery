@@ -72,7 +72,7 @@
         </form>
 
         <hr style="margin:24px 0;border-color:var(--border)">
-        <p style="font-size:13px;color:var(--muted);margin-bottom:16px;">还没有账号？请在下方注册（需要邀请码）：</p>
+        <p style="font-size:13px;color:var(--muted);margin-bottom:16px;" id="registerHint">还没有账号？请在下方注册：</p>
         <div id="registerStatus" style="color:var(--danger);margin-bottom:8px;font-size:13px;min-height:18px;"></div>
         <div class="field">
             <label for="regName">新用户名</label>
@@ -82,7 +82,7 @@
             <label for="regPwd">新密码（≥4位）</label>
             <input id="regPwd" type="password" placeholder="输入新密码" autocomplete="new-password">
         </div>
-        <div class="field">
+        <div class="field" id="inviteField">
             <label for="regInvite">邀请码</label>
             <input id="regInvite" type="text" placeholder="输入邀请码" autocomplete="off">
         </div>
@@ -90,6 +90,25 @@
     </div>
 
     <script>
+    let requireInvite = true;
+
+    // 页面加载时查询是否需要邀请码
+    (async function initInviteSetting() {
+        try {
+            const resp = await fetch('/api/settings/registration');
+            if (resp.ok) {
+                const data = await resp.json();
+                requireInvite = data.requireInvite !== false;
+            }
+        } catch (e) {
+            requireInvite = true;
+        }
+        if (!requireInvite) {
+            document.getElementById('inviteField').style.display = 'none';
+            document.getElementById('registerHint').textContent = '还没有账号？请在下方注册：';
+        }
+    })();
+
     document.getElementById('registerBtn').addEventListener('click', async () => {
         const name = document.getElementById('regName').value.trim();
         const password = document.getElementById('regPwd').value.trim();
@@ -98,7 +117,7 @@
         const errorEl = document.getElementById('loginError');
         if (!name) { statusEl.textContent = '请输入用户名'; return; }
         if (!password || password.length < 4) { statusEl.textContent = '密码至少需要 4 位'; return; }
-        if (!inviteCode) { statusEl.textContent = '请输入邀请码'; return; }
+        if (requireInvite && !inviteCode) { statusEl.textContent = '请输入邀请码'; return; }
         try {
             const resp = await fetch('/api/accounts', {
                 method: 'POST',
@@ -112,7 +131,6 @@
             }
             statusEl.style.color = 'var(--success,#2e7d32)';
             statusEl.textContent = '注册成功，正在登录...';
-            // 注册成功后自动登录
             document.getElementById('username').value = name;
             document.getElementById('password').value = password;
             errorEl.textContent = '';

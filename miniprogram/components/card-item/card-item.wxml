@@ -1,0 +1,13 @@
+<view class="card-row" bindtap="onTap">
+  <image class="card-image" src="{{card.imageUrl || ''}}" mode="aspectFit" />
+  <view class="card-info">
+    <view class="card-name">{{card.cardName || card.displayName}}</view>
+    <view class="card-meta">
+      {{card.productCode || ''}} {{card.cardCode || ''}}
+      <text wx:if="{{card.rarity}}"> · {{card.rarity}}</text>
+    </view>
+  </view>
+  <view class="card-quantity" wx:if="{{showQuantity}}">
+    {{card.quantity || card.displayQuantity || card.freeQuantity || 0}}
+  </view>
+</view>

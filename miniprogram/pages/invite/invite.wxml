@@ -1,0 +1,47 @@
+<view class="login-page">
+  <view class="login-card">
+    <view class="login-icon">{{mode === 'invite' ? '🎫' : '🔗'}}</view>
+    <view class="login-title">{{mode === 'invite' ? '注册新账号' : '绑定已有账号'}}</view>
+    <view class="login-subtitle">{{mode === 'invite' ? '输入邀请码创建新账号' : '输入 Web 端生成的 6 位绑定码'}}</view>
+
+    <view class="tab-row">
+      <view
+        class="tab-btn {{mode === 'invite' ? 'tab-active' : ''}}"
+        bindtap="switchToInvite"
+      >邀请码注册</view>
+      <view
+        class="tab-btn {{mode === 'bind' ? 'tab-active' : ''}}"
+        bindtap="switchToBind"
+      >绑定已有账号</view>
+    </view>
+
+    <input
+      wx:if="{{mode === 'invite'}}"
+      class="code-input"
+      type="text"
+      maxlength="16"
+      placeholder="请输入邀请码"
+      value="{{inviteCode}}"
+      bindinput="onCodeInput"
+    />
+
+    <input
+      wx:if="{{mode === 'bind'}}"
+      class="code-input bind-input"
+      type="number"
+      maxlength="6"
+      placeholder="输入 6 位绑定码"
+      value="{{bindCode}}"
+      bindinput="onBindCodeInput"
+    />
+
+    <view class="error-msg" wx:if="{{error}}">{{error}}</view>
+
+    <button
+      class="submit-btn"
+      type="primary"
+      bindtap="onSubmit"
+      disabled="{{submitting}}"
+    >{{submitting ? '提交中...' : '确认'}}</button>
+  </view>
+</view>

@@ -1,0 +1,45 @@
+.search-box {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+}
+
+.search-input {
+  flex: 1;
+  background: #252550;
+  border-radius: 8rpx;
+  padding: 16rpx 24rpx;
+  color: #e0e0e0;
+  font-size: 28rpx;
+}
+
+.search-btn {
+  flex-shrink: 0;
+}
+
+.regulation-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12rpx;
+  margin-top: 16rpx;
+}
+
+.reg-tag {
+  padding: 8rpx 20rpx;
+  border-radius: 20rpx;
+  font-size: 24rpx;
+  background: #252550;
+  color: #9ca3af;
+}
+
+.reg-tag.active {
+  background: #f5b700;
+  color: #1a1a2e;
+}
+
+.loading, .empty {
+  text-align: center;
+  padding: 100rpx 0;
+  color: #6b7280;
+  font-size: 28rpx;
+}

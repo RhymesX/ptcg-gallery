@@ -117,15 +117,18 @@ def get_card_index(product_code: str, card_name: str, card_code: str = "") -> st
     if not name:
         return None
 
-    # ── PROMO：直接取数字（CDN 路径使用 3 位零填充，如 082.png） ──
+    # ── PROMO：有数字编号直接用，否则走名字索引查找 ──
     promo_set = _resolve_promo_set_code(product_code, card_code)
     if promo_set:
         num = _extract_number(card_code)
         if num:
             return num.zfill(3)
+        # card_code 无数字（如 S-P），用卡名在 PROMO 索引中查找
+        set_code = promo_set
+    else:
+        # ── 标准系列 ──
+        set_code = _normalize_product_code(product_code)
 
-    # ── 标准系列 ──
-    set_code = _normalize_product_code(product_code)
     if not set_code:
         return None
 
@@ -205,9 +208,10 @@ def _strip_card_name_parens(name: str) -> str:
     return name
 
 
-def _extract_number(code: str) -> str:
-    """'054/072' → '54', '081' → '81'。"""
-    return code.strip().split("/")[0].lstrip("0")
+def _extract_number(code: str) -> str | None:
+    """'054/072' → '54', '081' → '81'。非数字返回 None。"""
+    part = code.strip().split("/")[0].lstrip("0")
+    return part if part.isdigit() else None
 
 
 # ── product_code 规范化 ──────────────────────────────────────

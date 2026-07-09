@@ -1,0 +1,95 @@
+<view class="page" wx:if="{{card}}">
+  <view class="header">
+    <view class="card-title">{{card.cardName}}</view>
+    <view class="card-code">{{card.productCode}} {{card.cardCode}}</view>
+  </view>
+
+  <view class="card-image-wrap" wx:if="{{cardImageUrl}}">
+    <image class="card-detail-image" src="{{cardImageUrl}}" mode="aspectFit" />
+  </view>
+
+  <view class="detail-section">
+    <view class="info-grid">
+      <view class="info-item">
+        <text class="info-label">类型</text>
+        <text class="info-value">{{card.cardType}} {{card.detail || ''}} {{card.special || ''}}</text>
+      </view>
+      <view class="info-item" wx:if="{{card.attribute}}">
+        <text class="info-label">属性</text>
+        <text class="info-value">{{card.attribute}}</text>
+      </view>
+      <view class="info-item" wx:if="{{card.regulation}}">
+        <text class="info-label">赛制</text>
+        <text class="info-value">{{card.regulation}}</text>
+      </view>
+      <view class="info-item" wx:if="{{card.rarity}}">
+        <text class="info-label">稀有度</text>
+        <text class="info-value">{{card.rarity}}</text>
+      </view>
+    </view>
+  </view>
+
+  <view class="detail-section">
+    <view class="section-title">库存信息</view>
+    <view class="quantity-row">
+      <view class="quantity-item">
+        <text class="qty-label">自由库存</text>
+        <text class="qty-value">{{card.freeQuantity || 0}}</text>
+      </view>
+      <view class="quantity-item">
+        <text class="qty-label">卡组中</text>
+        <text class="qty-value">{{card.deckQuantity || 0}}</text>
+      </view>
+      <view class="quantity-item">
+        <text class="qty-label">总量</text>
+        <text class="qty-value">{{card.ownedQuantity || 0}}</text>
+      </view>
+    </view>
+
+    <view class="free-adjust">
+      <input class="amount-input" type="number" placeholder="数量" value="{{freeAdjustAmount}}" bindinput="onFreeDeltaInput" />
+      <button class="action-btn plus" size="mini" bindtap="addFree">+ 入库</button>
+      <button class="action-btn minus" size="mini" bindtap="removeFree">- 出库</button>
+    </view>
+  </view>
+
+  <view class="detail-section">
+    <view class="section-title">卡组操作</view>
+    <button class="deck-btn" type="primary" bindtap="showDeckPicker">加入卡组 / 移出卡组</button>
+    <button class="delete-btn" bindtap="deleteCard">删除此卡</button>
+  </view>
+
+  <!-- 卡组选择弹窗 -->
+  <view class="modal" wx:if="{{deckPickerVisible}}">
+    <view class="modal-mask" bindtap="hideDeckPicker"></view>
+    <view class="modal-content">
+      <view class="modal-title">选择卡组</view>
+      <scroll-view scroll-y class="deck-list">
+        <block wx:for="{{decks}}" wx:key="id">
+          <view
+            class="deck-option {{selectedDeckId === item.id ? 'active' : ''}}"
+            data-deck-id="{{item.id}}"
+            bindtap="onDeckSelect"
+          >
+            <view class="deck-color" style="background:{{item.color || '#9ca3af'}}"></view>
+            <text>{{item.name}}</text>
+          </view>
+        </block>
+        <view wx:if="{{decks.length === 0}}" class="empty-decks">暂无卡组</view>
+      </scroll-view>
+      <view class="action-form">
+        <text>数量：</text>
+        <input class="amount-input small" type="number" value="{{deckActionAmount}}" bindinput="onActionAmountInput" />
+      </view>
+      <view class="action-form">
+        <text>同时操作自由库存：</text>
+        <switch checked="{{consumeFree}}" bindchange="onConsumeFreeToggle" />
+      </view>
+      <view class="modal-actions">
+        <button size="mini" bindtap="addToDeck">加入卡组</button>
+        <button size="mini" type="warn" bindtap="removeFromDeck">移出卡组</button>
+        <button size="mini" bindtap="hideDeckPicker">取消</button>
+      </view>
+    </view>
+  </view>
+</view>

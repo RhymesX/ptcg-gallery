@@ -95,6 +95,10 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
         if test_config.get("DEFAULT_EXCEL_PATH"):
             paths = AppPaths(paths.root_dir, paths.data_dir, paths.db_path, paths.accounts_dir, Path(app.config["DEFAULT_EXCEL_PATH"]))
 
+    from .wx_auth import init_jwt_secret
+
+    init_jwt_secret(app.config["SECRET_KEY"])
+
     database_exists = Path(app.config["DATABASE"]).exists()
     repository = CardRepository(app.config["DATABASE"], accounts_dir=paths.accounts_dir)
     repository.set_init_admin_pass(app.config["INIT_ADMIN_PASS"])
@@ -131,19 +135,37 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
 
     @app.before_request
     def _require_login():
-        """除登录页、静态文件和 health 外，统一要求登录。"""
-        if request.endpoint in ("login_page", "login_post", "register_account", "static", "health"):
+        """除登录页、静态文件和 health 外，统一要求登录。支持 session cookie 和 JWT Bearer token 两种方式。"""
+        if request.endpoint in ("login_page", "login_post", "register_account", "wx_login", "wx_bind", "serve_card_image", "serve_user_image", "static", "health"):
             repository.clear_request_account_id()
             return None
+
+        # Path 1: Flask session cookie（Web 端）
         account = _load_session_account(repository)
-        if account is None:
-            repository.clear_request_account_id()
-            # 对 API 请求返回 401，对页面请求重定向到登录页
-            if request.path.startswith("/api/"):
-                return jsonify({"error": "未登录"}), 401
-            return redirect(url_for("login_page", next=request.full_path))
-        repository.set_request_account_id(int(account["id"]))
-        return None
+        if account is not None:
+            repository.set_request_account_id(int(account["id"]))
+            return None
+
+        # Path 2: JWT Bearer token（微信小程序）
+        from .wx_auth import verify_jwt
+
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            token = auth_header[7:]
+            payload = verify_jwt(token)
+            if payload is not None:
+                account_id = int(payload["sub"])
+                with repository.connect_catalog() as conn:
+                    row = conn.execute("SELECT id FROM accounts WHERE id = ?", (account_id,)).fetchone()
+                if row is not None:
+                    repository.set_request_account_id(account_id)
+                    return None
+
+        repository.clear_request_account_id()
+        # 对 API 请求返回 401，对页面请求重定向到登录页
+        if request.path.startswith("/api/"):
+            return jsonify({"error": "未登录"}), 401
+        return redirect(url_for("login_page", next=request.full_path))
 
     @app.teardown_request
     def _clear_request_account(_exc: BaseException | None):
@@ -208,6 +230,21 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
     def summary():
         return jsonify(repository.stats())
 
+    @app.get("/api/settings/registration")
+    def get_registration_settings():
+        """获取注册相关设置（无需登录，供注册页面查询是否需要邀请码）。"""
+        return jsonify({"requireInvite": repository.is_invite_required()})
+
+    @app.put("/api/settings/registration")
+    def set_registration_settings():
+        """管理员设置注册邀请码开关。"""
+        if not session.get("is_admin"):
+            return jsonify({"error": "无权操作"}), 403
+        payload = request.get_json(force=True, silent=True) or {}
+        require_invite = bool(payload.get("requireInvite", True))
+        repository.set_invite_required(require_invite)
+        return jsonify({"requireInvite": repository.is_invite_required()})
+
     @app.get("/api/accounts")
     def list_accounts():
         account = _load_session_account(repository)
@@ -216,7 +253,7 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
 
     @app.post("/api/accounts")
     def register_account():
-        """注册新账号（可在登录页未登录状态下调用，需邀请码）。"""
+        """注册新账号（根据全局开关决定是否需要邀请码）。"""
         payload = request.get_json(force=True, silent=True) or {}
         name = (payload.get("name") or "").strip()
         password = (payload.get("password") or "").strip()
@@ -225,19 +262,124 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
             return jsonify({"error": "账号名称不能为空"}), 400
         if not password or len(password) < 4:
             return jsonify({"error": "密码至少需要 4 位"}), 400
-        if not invite_code:
-            return jsonify({"error": "需要邀请码才能注册"}), 400
+
+        require_invite = repository.is_invite_required()
+        if require_invite:
+            if not invite_code:
+                return jsonify({"error": "需要邀请码才能注册"}), 400
+
         result = repository.create_account(name, password)
-        # 获取刚创建的账号 ID
         account = repository.get_account_by_name(name)
         if account is None:
             return jsonify({"error": "注册失败"}), 500
-        if not repository.validate_and_consume_invite_code(invite_code, int(account["id"])):
-            # 邀请码无效，直接删除刚创建的账号
-            with repository.connect() as conn:
-                conn.execute("DELETE FROM accounts WHERE id = ?", (int(account["id"]),))
-            return jsonify({"error": "邀请码无效或已过期"}), 400
+
+        if require_invite:
+            if not repository.validate_and_consume_invite_code(invite_code, int(account["id"])):
+                with repository.connect() as conn:
+                    conn.execute("DELETE FROM accounts WHERE id = ?", (int(account["id"]),))
+                return jsonify({"error": "邀请码无效或已过期"}), 400
+
         return jsonify(result), 201
+
+    @app.post("/api/wx/login")
+    def wx_login():
+        """微信小程序登录：已绑定→返回JWT，未绑定→根据邀请码开关决定自动创建还是要求输入邀请码。"""
+        payload = request.get_json(force=True, silent=True) or {}
+        code = (payload.get("code") or "").strip()
+        if not code:
+            return jsonify({"error": "缺少登录凭证 code"}), 400
+
+        from .wx_auth import create_jwt, decode_wechat_code
+
+        try:
+            wx_data = decode_wechat_code(code)
+        except RuntimeError as exc:
+            return jsonify({"error": str(exc)}), 400
+
+        openid = wx_data["openid"]
+        account = repository.get_account_by_wx_openid(openid)
+        if account is not None:
+            account_id = int(account["id"])
+            account_name = account["name"]
+            token = create_jwt(account_id, account_name)
+            return jsonify({
+                "token": token,
+                "accountId": account_id,
+                "accountName": account_name,
+            })
+
+        # 未绑定账号
+        invite_code = (payload.get("inviteCode") or "").strip()
+
+        if not repository.is_invite_required():
+            # 开关关闭，自动创建账号
+            account_name = f"微信用户{openid[-6:]}"
+            result = repository.create_wechat_account(account_name, openid)
+            token = create_jwt(result["id"], result["name"])
+            return jsonify({
+                "token": token,
+                "accountId": result["id"],
+                "accountName": result["name"],
+            })
+
+        # 开关打开，需要邀请码
+        if not invite_code:
+            return jsonify({"needInvite": True, "openid": openid})
+
+        if not repository.validate_and_consume_invite_code(invite_code):
+            return jsonify({"error": "邀请码无效或已过期"}), 400
+
+        account_name = f"微信用户{openid[-6:]}"
+        result = repository.create_wechat_account(account_name, openid)
+        token = create_jwt(result["id"], result["name"])
+        return jsonify({
+            "token": token,
+            "accountId": result["id"],
+            "accountName": result["name"],
+        })
+
+    @app.post("/api/wx/bind")
+    def wx_bind():
+        """小程序端提交绑定码，将 openid 绑定到已有账号，返回 JWT。"""
+        payload = request.get_json(force=True, silent=True) or {}
+        bind_code = (payload.get("code") or "").strip()
+        openid = (payload.get("openid") or "").strip()
+        if not bind_code:
+            return jsonify({"error": "请输入绑定码"}), 400
+        if not openid:
+            return jsonify({"error": "缺少 openid"}), 400
+
+        from .wx_auth import create_jwt
+
+        account_id = repository.consume_bind_code(bind_code)
+        if account_id is None:
+            return jsonify({"error": "绑定码无效或已过期"}), 400
+
+        # 检查该账号是否已绑定了其他微信号
+        existing = repository.get_account_by_wx_openid(openid)
+        if existing is not None:
+            return jsonify({"error": "该微信已绑定过账号"}), 409
+
+        repository.bind_wx_openid(account_id, openid)
+        account = repository.get_account_by_wx_openid(openid)
+        if account is None:
+            return jsonify({"error": "绑定失败"}), 500
+
+        token = create_jwt(int(account["id"]), account["name"])
+        return jsonify({
+            "token": token,
+            "accountId": int(account["id"]),
+            "accountName": account["name"],
+        })
+
+    @app.post("/api/account/bind-code")
+    def create_bind_code():
+        """已登录 Web 用户生成一个 5 分钟有效的绑定码，供小程序端绑定使用。"""
+        account = _load_session_account(repository)
+        if account is None:
+            return jsonify({"error": "未登录"}), 401
+        code = repository.create_bind_code(int(account["id"]))
+        return jsonify({"code": code})
 
     @app.put("/api/accounts/password")
     def change_account_password():
@@ -568,6 +710,26 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
         card_code = request.args.get("cardCode", "").strip()
         url = image_service.get_image_url(card_name, product_code, card_code)
         return jsonify({"url": url})
+
+    @app.post("/api/images/lookup-batch")
+    def lookup_card_images_batch():
+        """批量查询卡牌图片。请求体：{ cards: [{ name, productCode?, cardCode? }] }
+        返回：{ urls: { "name|productCode|cardCode": "/api/images/xxx" } }
+        """
+        payload = request.get_json(force=True, silent=True) or {}
+        cards = payload.get("cards") or []
+        result = {}
+        for c in cards:
+            if not c or not c.get("name"):
+                continue
+            name = c["name"].strip()
+            pc = (c.get("productCode") or "").strip()
+            cc = (c.get("cardCode") or "").strip()
+            key = f"{name}|{pc}|{cc}"
+            url = image_service.get_image_url(name, pc, cc)
+            if url:
+                result[key] = url
+        return jsonify({"urls": result})
 
     @app.get("/api/images/user/<filename>")
     def serve_user_image(filename: str):

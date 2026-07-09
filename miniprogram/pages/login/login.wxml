@@ -1,0 +1,12 @@
+<view class="login-page">
+  <view class="login-card" wx:if="{{loading}}">
+    <view class="login-icon">&#9830;</view>
+    <view class="login-title">PTCG 卡牌收藏</view>
+    <view class="login-subtitle">正在登录...</view>
+  </view>
+  <view class="login-card" wx:if="{{error}}">
+    <view class="login-title">登录失败</view>
+    <view class="login-subtitle">{{error}}</view>
+    <button type="primary" bindtap="doLogin">重试</button>
+  </view>
+</view>
