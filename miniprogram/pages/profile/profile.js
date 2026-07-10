@@ -55,5 +55,9 @@ Page({
 
   goToDecks() {
     wx.redirectTo({ url: '/pages/decks/decks' });
+  },
+
+  onRetireTap() {
+    wx.showToast({ title: '请在网页端使用此功能', icon: 'none' });
   }
 });

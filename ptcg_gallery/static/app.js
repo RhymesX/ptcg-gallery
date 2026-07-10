@@ -34,27 +34,14 @@ const elements = {
     deckDescriptionInput: document.getElementById('deckDescriptionInput'),
     resetDeckBtn: document.getElementById('resetDeckBtn'),
     currentAccountName: document.getElementById('currentAccountName'),
-    adminResetPanel: document.getElementById('adminResetPanel'),
-    adminResetAccountSelect: document.getElementById('adminResetAccountSelect'),
-    adminResetPasswordInput: document.getElementById('adminResetPasswordInput'),
-    adminResetBtn: document.getElementById('adminResetBtn'),
-    adminDeleteAccountBtn: document.getElementById('adminDeleteAccountBtn'),
-    accountTotalCount: document.getElementById('accountTotalCount'),
     accountStatus: document.getElementById('accountStatus'),
-    invitePanel: document.getElementById('invitePanel'),
-    generateInviteBtn: document.getElementById('generateInviteBtn'),
-    inviteCodeList: document.getElementById('inviteCodeList'),
     generateBindCodeBtn: document.getElementById('generateBindCodeBtn'),
     bindCodeStatus: document.getElementById('bindCodeStatus'),
-    inviteEmptyMsg: document.getElementById('inviteEmptyMsg'),
-    inviteStatus: document.getElementById('inviteStatus'),
     importDefaultCatalogBtn: document.getElementById('importDefaultCatalogBtn'),
     catalogUploadInput: document.getElementById('catalogUploadInput'),
     stateUploadInput: document.getElementById('stateUploadInput'),
     inventoryUploadInput: document.getElementById('inventoryUploadInput')
 };
-
-let crawlerMode = 'off';  // 全局，供 renderResults 判断
 
 async function api(url, options = {}) {
     const response = await fetch(url, {
@@ -218,72 +205,12 @@ function renderAccounts(payload) {
     if (elements.currentAccountName) {
         elements.currentAccountName.textContent = (state.currentAccount?.name || '-') + (state.isAdmin ? ' (管理员)' : '');
     }
-    if (elements.adminResetPanel) {
-        elements.adminResetPanel.style.display = state.isAdmin ? '' : 'none';
-    }
-    if (elements.adminResetAccountSelect) {
-        const items = payload?.items || [];
-        elements.adminResetAccountSelect.innerHTML = items
-            .filter(item => String(item.name) !== 'RhymesX')
-            .map(item => `<option value="${item.id}">${escapeHtml(item.name)}</option>`)
-            .join('');
-    }
-    if (elements.accountTotalCount) {
-        elements.accountTotalCount.style.display = state.isAdmin ? '' : 'none';
-        elements.accountTotalCount.textContent = state.isAdmin ? `共 ${(payload?.items || []).length} 个账号` : '';
-    }
-    if (elements.invitePanel) {
-        elements.invitePanel.style.display = state.isAdmin ? '' : 'none';
-    }
-    // 卡图下载面板仅管理员可见
-    const crawlerPanel = document.getElementById('crawlerPanel');
-    if (crawlerPanel) {
-        crawlerPanel.style.display = state.isAdmin ? '' : 'none';
-    }
-    if (state.isAdmin) {
-        loadInviteCodes();
-        loadInviteSetting();
-    }
 }
 
 async function loadAccounts() {
     const payload = await api('/api/accounts');
     renderAccounts(payload);
     return payload;
-}
-
-// ── 邀请码管理（仅管理员） ───────────────────────────
-
-async function loadInviteCodes() {
-    try {
-        const data = await api('/api/invite-codes');
-        const codes = data?.codes || [];
-        if (!elements.inviteCodeList) return;
-        if (codes.length === 0) {
-            elements.inviteCodeList.innerHTML = '<p id="inviteEmptyMsg">暂无有效邀请码</p>';
-            return;
-        }
-        elements.inviteCodeList.innerHTML = codes.map(c => {
-            const expiresAt = c.expiresAt ? new Date(c.expiresAt + 'Z').toLocaleString('zh-CN') : '-';
-            const timeLeft = c.expiresAt ? `<span style="color:var(--muted);">（失效: ${expiresAt}）</span>` : '';
-            return `<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid var(--border);">
-                <code style="font-size:14px;font-weight:700;">${escapeHtml(c.code)}</code>
-                ${timeLeft}
-            </div>`;
-        }).join('');
-    } catch (error) {
-        setStatus(elements.inviteStatus, error.message, 'warning');
-    }
-}
-
-async function generateInviteCode() {
-    try {
-        const data = await api('/api/invite-codes', { method: 'POST' });
-        await loadInviteCodes();
-        setStatus(elements.inviteStatus, '邀请码已生成，有效期 24 小时。', 'success');
-    } catch (error) {
-        setStatus(elements.inviteStatus, error.message, 'warning');
-    }
 }
 
 async function generateBindCode() {
@@ -305,36 +232,6 @@ async function generateBindCode() {
         setStatus(elements.bindCodeStatus, error.message, 'warning');
     }
 }
-
-async function loadInviteSetting() {
-    const btn = document.getElementById('toggleInviteBtn');
-    if (!btn) return;
-    try {
-        const data = await api('/api/settings/registration');
-        btn.textContent = data.requireInvite ? '已开启（点击关闭）' : '已关闭（点击开启）';
-        btn.className = data.requireInvite ? 'danger' : '';
-        btn.dataset.enabled = data.requireInvite ? '1' : '0';
-    } catch (e) {
-        btn.textContent = '获取失败';
-    }
-}
-
-async function toggleInviteRequired() {
-    const btn = document.getElementById('toggleInviteBtn');
-    if (!btn) return;
-    const current = btn.dataset.enabled === '1';
-    try {
-        await api('/api/settings/registration', { method: 'PUT', body: { requireInvite: !current } });
-        await loadInviteSetting();
-    } catch (error) {
-        alert('操作失败：' + error.message);
-    }
-}
-
-document.addEventListener('DOMContentLoaded', () => {
-    const btn = document.getElementById('toggleInviteBtn');
-    if (btn) btn.addEventListener('click', toggleInviteRequired);
-});
 
 // ── 改密弹窗 ───────────────────────────────────────────
 
@@ -402,54 +299,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 })();
 
-async function adminResetPassword() {
-    const select = elements.adminResetAccountSelect;
-    const accountId = Number(select?.value || 0);
-    if (!accountId) {
-        setStatus(elements.accountStatus, '请选择要重置的目标账号。', 'warning');
-        return;
-    }
-    const newPassword = (elements.adminResetPasswordInput?.value || '').trim();
-    if (!newPassword || newPassword.length < 4) {
-        setStatus(elements.accountStatus, '新密码至少需要 4 位。', 'warning');
-        return;
-    }
-    const targetName = select?.options[select.selectedIndex]?.textContent || accountId;
-    if (!confirm(`确认重置账号“${targetName}”的密码为“${newPassword}”？`)) {
-        return;
-    }
-    try {
-        await api(`/api/accounts/${accountId}/password`, {
-            method: 'PUT',
-            body: JSON.stringify({ newPassword })
-        });
-        if (elements.adminResetPasswordInput) elements.adminResetPasswordInput.value = '';
-        setStatus(elements.accountStatus, `已重置账号“${targetName}”的密码。`, 'success');
-    } catch (error) {
-        setStatus(elements.accountStatus, error.message, 'warning');
-    }
-}
-
-async function adminDeleteAccount() {
-    const select = elements.adminResetAccountSelect;
-    const accountId = Number(select?.value || 0);
-    if (!accountId) {
-        setStatus(elements.accountStatus, '请选择要删除的目标账号。', 'warning');
-        return;
-    }
-    const targetName = select?.options[select.selectedIndex]?.textContent || accountId;
-    if (!confirm(`确定要删除账号“${targetName}”吗？\n\n该账号的所有卡组和库存数据将被永久删除，无法恢复。`)) {
-        return;
-    }
-    try {
-        await api(`/api/accounts/${accountId}`, { method: 'DELETE' });
-        await loadAccounts();
-        setStatus(elements.accountStatus, `已删除账号“${targetName}”。`, 'success');
-    } catch (error) {
-        setStatus(elements.accountStatus, error.message, 'warning');
-    }
-}
-
 function renderResults() {
     elements.resultList.style.display = '';
     if (!state.results.length) {
@@ -490,7 +339,7 @@ function renderResults() {
     });
 
     // 始终尝试加载本地缓存图片；若未命中则按下载模式决定是否等待
-    initCardImages(elements.resultList, crawlerMode !== 'off');
+    initCardImages(elements.resultList, false);
 }
 
 function renderRegulationFilters() {
@@ -693,7 +542,7 @@ function renderCardDetail(card) {
     });
 
     // 始终尝试加载本地缓存图片；若未命中则按下载模式决定是否等待
-    initCardImages(elements.cardDetail, crawlerMode !== 'off');
+    initCardImages(elements.cardDetail, false);
 }
 
 async function mutateCard(url, payload, method = 'POST') {
@@ -970,12 +819,6 @@ elements.changePasswordBtn?.addEventListener('click', changePassword);
 elements.newPasswordInput?.addEventListener('keydown', (event) => {
     if (event.key === 'Enter') { event.preventDefault(); void changePassword(); }
 });
-elements.adminResetBtn?.addEventListener('click', adminResetPassword);
-elements.adminResetPasswordInput?.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter') { event.preventDefault(); void adminResetPassword(); }
-});
-elements.generateInviteBtn?.addEventListener('click', generateInviteCode);
-elements.adminDeleteAccountBtn?.addEventListener('click', adminDeleteAccount);
 elements.generateBindCodeBtn?.addEventListener('click', generateBindCode);
 
 if (elements.deckForm) {
@@ -1082,93 +925,12 @@ elements.inventoryUploadInput.addEventListener('change', async (event) => {
     }
 });
 
-// ── 爬虫控制 ──────────────────────────────────────────────
-
-const crawlerElements = {
-    offBtn: document.getElementById('crawlerOffBtn'),
-    demandBtn: document.getElementById('crawlerDemandBtn'),
-    onBtn: document.getElementById('crawlerOnBtn'),
-    scheduledBtn: document.getElementById('crawlerScheduledBtn'),
-    modeLabel: document.getElementById('crawlerModeLabel'),
-    statusLine: document.getElementById('crawlerStatus'),
-};
-
-const CRAWLER_MODE_LABELS = {
-    off: '仅本地',
-    demand: '点开下载',
-    on: '持续爬取',
-    scheduled: '凌晨3点',
-};
-
-const CRAWLER_STATUS_TEXTS = {
-    off: '当前：仅本地图片（不自动下载）',
-    demand: '当前：点击卡牌详情时下载该卡图片',
-    on: '当前：持续爬取 + 自动下载',
-    scheduled: '当前：凌晨3点定时 + 自动下载',
-};
-
-async function setCrawlerMode(mode) {
-    try {
-        const result = await api('/api/crawler/mode', {
-            method: 'PUT',
-            body: JSON.stringify({ mode }),
-        });
-        if (result.ok) {
-            updateCrawlerUI(mode);
-        }
-    } catch (error) {
-        crawlerElements.statusLine.textContent = '爬虫模式切换失败: ' + error.message;
-    }
-}
-
-function updateCrawlerUI(mode) {
-    crawlerMode = mode;
-    const btnMap = { off: crawlerElements.offBtn, demand: crawlerElements.demandBtn, on: crawlerElements.onBtn, scheduled: crawlerElements.scheduledBtn };
-    Object.entries(btnMap).forEach(([m, btn]) => {
-        if (!btn) return;
-        btn.classList.toggle('is-active', m === mode);
-    });
-    if (crawlerElements.modeLabel) {
-        crawlerElements.modeLabel.textContent = CRAWLER_MODE_LABELS[mode] || mode;
-    }
-    if (crawlerElements.statusLine) {
-        crawlerElements.statusLine.textContent = CRAWLER_STATUS_TEXTS[mode] || '';
-    }
-}
-
-async function loadCrawlerStatus() {
-    try {
-        const stats = await api('/api/crawler/status');
-        updateCrawlerUI(stats.mode || 'off');
-        if (stats.total_cards > 0 && (stats.mode === 'on' || stats.running)) {
-            const pct = Math.round((stats.cached / stats.total_cards) * 100);
-            crawlerElements.statusLine.textContent =
-                `爬取中：${stats.cached}/${stats.total_cards} (${pct}%)  |  简中 ${stats.zh_downloaded}  英文 ${stats.en_downloaded}`;
-        }
-    } catch (_) {
-        updateCrawlerUI('off');
-    }
-}
-
-async function initCrawlerControls() {
-    const { offBtn, demandBtn, onBtn, scheduledBtn } = crawlerElements;
-    if (offBtn) offBtn.addEventListener('click', () => setCrawlerMode('off'));
-    if (demandBtn) demandBtn.addEventListener('click', () => setCrawlerMode('demand'));
-    if (onBtn) onBtn.addEventListener('click', () => setCrawlerMode('on'));
-    if (scheduledBtn) scheduledBtn.addEventListener('click', () => setCrawlerMode('scheduled'));
-    await loadCrawlerStatus();
-    setInterval(loadCrawlerStatus, 10000);
-}
-
 (async function init() {
     try {
         clearLegacySearchPreferenceStorage();
         await Promise.all([loadAccounts(), loadSummary(), loadDecks(true), loadSearchOptions()]);
         await refreshSearch(false);
         elements.cardDetail.innerHTML = EMPTY_DETAIL_HTML;
-        if (state.isAdmin) {
-            await initCrawlerControls();
-        }
     } catch (error) {
         setStatus(elements.searchStatus, error.message, 'warning');
     }

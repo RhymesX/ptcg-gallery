@@ -1014,9 +1014,162 @@ async function saveSortGroupsOrder() {
     }
 }
 
+// ── 退标弹窗 ────────────────────────────────────────────────────
+
+let retireData = null;
+
+async function openRetireModal() {
+    const modal = document.getElementById('retireModal');
+    document.getElementById('retireStep1').style.display = '';
+    document.getElementById('retireStep2').style.display = 'none';
+    modal.style.display = 'grid';
+
+    try {
+        const opts = await api('/api/search/options');
+        const regulations = opts.regulations || [];
+        const select = document.getElementById('retireRegulation');
+        select.innerHTML = '<option value="">请选择赛制</option>' +
+            regulations.map(r => `<option value="${escapeHtml(r)}">${escapeHtml(r)} 标</option>`).join('');
+    } catch (_) {}
+}
+
+function closeRetireModal() {
+    document.getElementById('retireModal').style.display = 'none';
+    retireData = null;
+}
+
+function renderRetireCards() {
+    const list = document.getElementById('retireCardList');
+    const cards = retireData.cards || [];
+    if (!cards.length) {
+        list.innerHTML = '<div class="empty-state">没有符合条件的卡牌</div>';
+        document.getElementById('retireSelectedCount').textContent = '0 / 0 张';
+        document.getElementById('retireSummary').textContent = '没有符合条件的卡牌';
+        return;
+    }
+    const totalQty = cards.reduce((s, c) => s + (c.ownedQuantity || 0), 0);
+    document.getElementById('retireSummary').textContent = `共 ${cards.length} 种卡牌，${totalQty} 张`;
+    updateRetireSelectedCount();
+
+    list.innerHTML = cards.map((card, i) => {
+        const displayCode = card.displayCode || '';
+        const deckBreakdown = card.deckBreakdown || [];
+        let locationHtml = '';
+        const freeQty = card.freeQuantity || 0;
+        if (freeQty > 0) {
+            locationHtml += `<span class="retire-loc-free">空闲 ${freeQty}</span>`;
+        }
+        if (deckBreakdown.length > 0) {
+            deckBreakdown.forEach(d => {
+                const deck = (retireData.decks || []).find(dd => dd.id === d.deckId);
+                locationHtml += `<span class="retire-loc-deck" style="background:${escapeHtml(deck?.color || '#9ca3af')}22;color:${escapeHtml(deck?.color || '#9ca3af')};">${escapeHtml(d.deckName)} ${d.quantity}</span>`;
+            });
+        }
+        return `
+            <label class="retire-card-row">
+                <input type="checkbox" class="retire-card-check" data-index="${i}" checked>
+                <span class="retire-card-name">${escapeHtml(card.cardName)}</span>
+                <span class="retire-card-code">${escapeHtml(displayCode)}</span>
+                <span class="retire-card-rarity">${escapeHtml(card.rarity || '-')}</span>
+                <span class="retire-card-qty">${card.ownedQuantity || 0}张</span>
+                <span class="retire-card-location">${locationHtml}</span>
+            </label>
+        `;
+    }).join('');
+
+    const selectAll = document.getElementById('retireSelectAll');
+    selectAll.checked = true;
+    selectAll.indeterminate = false;
+
+    list.addEventListener('change', () => {
+        const checks = list.querySelectorAll('.retire-card-check');
+        const checked = list.querySelectorAll('.retire-card-check:checked');
+        selectAll.checked = checked.length === checks.length;
+        selectAll.indeterminate = checked.length > 0 && checked.length < checks.length;
+        updateRetireSelectedCount();
+    });
+}
+
+function updateRetireSelectedCount() {
+    const checks = document.getElementById('retireCardList').querySelectorAll('.retire-card-check');
+    const checked = document.getElementById('retireCardList').querySelectorAll('.retire-card-check:checked');
+    let qty = 0;
+    checked.forEach(cb => {
+        const idx = parseInt(cb.dataset.index);
+        if (retireData && retireData.cards && retireData.cards[idx]) {
+            qty += retireData.cards[idx].ownedQuantity || 0;
+        }
+    });
+    document.getElementById('retireSelectedCount').textContent = `已选 ${checked.length} 种 / ${qty} 张`;
+}
+
+async function loadRetirePreview() {
+    const regulation = document.getElementById('retireRegulation').value;
+    if (!regulation) {
+        alert('请先选择赛制');
+        return;
+    }
+    const skipSameName = document.getElementById('retireSkipSameName').checked;
+    const includeDeckCards = document.getElementById('retireIncludeDeckCards').checked;
+    const params = new URLSearchParams({ regulation, skipSameName, includeDeckCards });
+    try {
+        retireData = await api(`/api/retire/preview?${params}`);
+        document.getElementById('retireStep1').style.display = 'none';
+        document.getElementById('retireStep2').style.display = '';
+        document.getElementById('retireRegulationLabel').textContent = retireData.regulation + ' 标';
+        renderRetireCards();
+    } catch (err) {
+        alert(err.message);
+    }
+}
+
+async function executeRetire() {
+    if (!retireData) return;
+    const checks = document.getElementById('retireCardList').querySelectorAll('.retire-card-check:checked');
+    const cardIds = Array.from(checks).map(cb => {
+        const idx = parseInt(cb.dataset.index);
+        return retireData.cards[idx]?.id;
+    }).filter(Boolean);
+    if (!cardIds.length) {
+        alert('请至少选择一张卡牌');
+        return;
+    }
+    if (!confirm(`确认退标 ${cardIds.length} 种卡牌？此操作不可撤销。`)) return;
+    try {
+        await api('/api/retire/execute', {
+            method: 'POST',
+            body: JSON.stringify({ cardIds, regulation: retireData.regulation })
+        });
+        closeRetireModal();
+        await refreshInventoryTable();
+    } catch (err) {
+        alert(err.message);
+    }
+}
+
+function bindRetireEvents() {
+    document.getElementById('retireBtn').addEventListener('click', openRetireModal);
+    document.getElementById('retireCloseBtn').addEventListener('click', closeRetireModal);
+    document.getElementById('retireBackBtn').addEventListener('click', () => {
+        document.getElementById('retireStep1').style.display = '';
+        document.getElementById('retireStep2').style.display = 'none';
+    });
+    document.getElementById('retireModal').addEventListener('click', (e) => {
+        if (e.target === e.currentTarget) closeRetireModal();
+    });
+    document.getElementById('retireFilterBtn').addEventListener('click', loadRetirePreview);
+    document.getElementById('retireExecuteBtn').addEventListener('click', executeRetire);
+    document.getElementById('retireSelectAll').addEventListener('change', function () {
+        const checks = document.getElementById('retireCardList').querySelectorAll('.retire-card-check');
+        checks.forEach(cb => { cb.checked = this.checked; });
+        updateRetireSelectedCount();
+    });
+}
+
 (async function init() {
     try {
         bindEvents();
+        bindRetireEvents();
         await refreshInventoryTable();
     } catch (error) {
         elements.content.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;

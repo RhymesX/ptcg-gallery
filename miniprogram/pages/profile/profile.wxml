@@ -22,6 +22,11 @@
     </view>
 
     <view class="setting-group">
+      <view class="setting-title">工具</view>
+      <button class="retire-btn" bindtap="onRetireTap" disabled>退标（请在网页端使用）</button>
+    </view>
+
+    <view class="setting-group">
       <button class="logout-btn" bindtap="onLogout">退出登录</button>
     </view>
   </scroll-view>

@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>管理后台 - ptcgGallery</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<div class="page-shell">
+    <header class="hero">
+        <div>
+            <a class="back-link" href="/">← 返回首页</a>
+            <h1>管理后台</h1>
+            <p>账号管理、邀请码管理、爬虫控制。</p>
+        </div>
+    </header>
+
+    <main class="admin-layout">
+        <section class="panel">
+            <h2>账号管理</h2>
+            <label for="adminAccountSelect" class="field-label" style="margin-bottom:6px;">选择目标账号</label>
+            <div class="admin-reset-row">
+                <select id="adminAccountSelect" aria-label="目标账号"></select>
+                <input id="adminResetPasswordInput" type="password" placeholder="新密码（≥4位）">
+            </div>
+            <div style="display:flex;gap:8px;margin-top:8px;">
+                <button id="adminResetBtn" type="button" class="danger" style="flex:1;">重置密码</button>
+                <button id="adminDeleteAccountBtn" type="button" class="danger">删除账号</button>
+            </div>
+            <p class="status-line" id="accountStatus" style="margin-top:8px;"></p>
+        </section>
+
+        <section class="panel">
+            <h2>邀请码管理</h2>
+            <div style="display:flex;gap:8px;margin-bottom:8px;">
+                <button id="generateInviteBtn" type="button" style="flex:1;">生成邀请码</button>
+            </div>
+            <div id="inviteCodeList" style="font-size:12px;color:var(--muted);">
+                <p id="inviteEmptyMsg">暂无有效邀请码</p>
+            </div>
+            <p class="status-line" id="inviteStatus" style="margin:4px 0 0;"></p>
+            <div style="margin-top:8px;display:flex;align-items:center;gap:8px;">
+                <span style="font-size:12px;color:var(--muted);">注册邀请码开关</span>
+                <button id="toggleInviteBtn" type="button" style="font-size:12px;">加载中...</button>
+            </div>
+        </section>
+
+        <section class="panel">
+            <h2>卡图下载</h2>
+            <div class="section-head compact-head">
+                <span class="section-count" id="crawlerModeLabel">仅本地</span>
+            </div>
+            <div class="crawler-buttons">
+                <button id="crawlerOffBtn" type="button" class="secondary crawler-mode-btn is-active">仅本地</button>
+                <button id="crawlerDemandBtn" type="button" class="secondary crawler-mode-btn">点开下载</button>
+                <button id="crawlerOnBtn" type="button" class="secondary crawler-mode-btn">持续爬取</button>
+                <button id="crawlerScheduledBtn" type="button" class="secondary crawler-mode-btn">凌晨3点</button>
+            </div>
+            <p class="status-line" id="crawlerStatus">当前：仅本地图片（不自动下载）</p>
+        </section>
+    </main>
+</div>
+
+<script src="{{ url_for('static', filename='admin.js') }}"></script>
+</body>
+</html>

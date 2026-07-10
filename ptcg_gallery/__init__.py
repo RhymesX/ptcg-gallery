@@ -171,6 +171,10 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
     def _clear_request_account(_exc: BaseException | None):
         repository.clear_request_account_id()
 
+    @app.context_processor
+    def _inject_admin_flag():
+        return {"is_admin": bool(session.get("is_admin"))}
+
     @app.get("/login")
     def login_page():
         return render_template("login.html")
@@ -206,9 +210,11 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
     def index():
         return render_template("index.html")
 
-    @app.get("/holdings")
-    def holdings_page():
-        return render_template("holdings.html")
+    @app.get("/admin")
+    def admin_page():
+        if not session.get("is_admin"):
+            return redirect("/")
+        return render_template("admin.html")
 
     @app.get("/inventory-table")
     def inventory_table_page():
@@ -274,10 +280,11 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
             return jsonify({"error": "注册失败"}), 500
 
         if require_invite:
-            if not repository.validate_and_consume_invite_code(invite_code, int(account["id"])):
+            if not repository.validate_invite_code(invite_code):
                 with repository.connect() as conn:
                     conn.execute("DELETE FROM accounts WHERE id = ?", (int(account["id"]),))
                 return jsonify({"error": "邀请码无效或已过期"}), 400
+            repository.consume_invite_code(invite_code, int(account["id"]))
 
         return jsonify(result), 201
 
@@ -326,11 +333,12 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
         if not invite_code:
             return jsonify({"needInvite": True, "openid": openid})
 
-        if not repository.validate_and_consume_invite_code(invite_code):
+        if not repository.validate_invite_code(invite_code):
             return jsonify({"error": "邀请码无效或已过期"}), 400
 
         account_name = f"微信用户{openid[-6:]}"
         result = repository.create_wechat_account(account_name, openid)
+        repository.consume_invite_code(invite_code, result["id"])
         token = create_jwt(result["id"], result["name"])
         return jsonify({
             "token": token,
@@ -378,7 +386,10 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
         account = _load_session_account(repository)
         if account is None:
             return jsonify({"error": "未登录"}), 401
-        code = repository.create_bind_code(int(account["id"]))
+        try:
+            code = repository.create_bind_code(int(account["id"]))
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
         return jsonify({"code": code})
 
     @app.put("/api/accounts/password")
@@ -614,6 +625,24 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
     def delete_card(card_id: int):
         repository.delete_card(card_id)
         return Response(status=204)
+
+    # ── 退标 ──────────────────────────────────────────────────────
+
+    @app.get("/api/retire/preview")
+    def retire_preview():
+        regulation = request.args.get("regulation", "").strip()
+        skip_same_name = request.args.get("skipSameName", "true").lower() != "false"
+        include_deck_cards = request.args.get("includeDeckCards", "true").lower() != "false"
+        if not regulation:
+            return jsonify({"regulation": "", "decks": [], "cards": [], "totalCount": 0, "totalQuantity": 0})
+        return jsonify(repository.preview_retire_by_regulation(regulation, skip_same_name, include_deck_cards))
+
+    @app.post("/api/retire/execute")
+    def retire_execute():
+        payload = request.get_json(silent=True) or {}
+        card_ids = [int(x) for x in (payload.get("cardIds") or [])]
+        removed = repository.execute_retire_cards(card_ids)
+        return jsonify({"removed": removed})
 
     @app.post("/api/import/catalog-default")
     def import_catalog_default():

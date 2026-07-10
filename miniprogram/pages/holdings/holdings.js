@@ -215,5 +215,6 @@ Page({
 
   goToProfile() {
     wx.redirectTo({ url: '/pages/profile/profile' });
-  }
+  },
+
 });

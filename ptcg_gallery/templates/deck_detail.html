@@ -15,6 +15,7 @@
             <p id="deckSubtitle">加载中...</p>
         </div>
         <div class="toolbar compact deck-page-links">
+            {% if is_admin %}<a class="button-link secondary" href="/admin">管理后台</a>{% endif %}
             <a class="button-link secondary" href="/inventory-table">打开库存表格</a>
             <a class="button-link" href="/decks">卡组管理</a>
         </div>

@@ -15,6 +15,7 @@
         </div>
         <div style="display:flex;align-items:center;gap:12px;">
             <div class="stats" id="summaryCards"></div>
+            {% if is_admin %}<a class="button-link secondary" href="/admin" style="white-space:nowrap;">管理后台</a>{% endif %}
             <button id="changePwdTrigger" type="button" class="secondary" style="white-space:nowrap;">改密</button>
             <button id="logoutBtn" type="button" class="secondary" style="white-space:nowrap;">登出</button>
         </div>
@@ -71,34 +72,6 @@
                 <div class="section-head compact-head">
                     <h3 class="section-title">账号</h3>
                     <span class="section-count" id="currentAccountName">加载中</span>
-                    <span class="section-count" id="accountTotalCount" style="display:none;"></span>
-                </div>
-
-                <div id="adminResetPanel" class="admin-reset-panel" style="display:none;">
-                    <label for="adminResetAccountSelect" class="field-label" style="margin-bottom:6px;">管理员重置密码</label>
-                    <div class="admin-reset-row">
-                        <select id="adminResetAccountSelect" aria-label="目标账号"></select>
-                        <input id="adminResetPasswordInput" type="password" placeholder="新密码（≥4位）">
-                    </div>
-                    <div style="display:flex;gap:8px;">
-                        <button id="adminResetBtn" type="button" class="danger" style="flex:1;">重置密码</button>
-                        <button id="adminDeleteAccountBtn" type="button" class="danger">删除账号</button>
-                    </div>
-                </div>
-
-                <div id="invitePanel" style="display:none;border-top:1px solid var(--border);padding-top:8px;margin-top:4px;">
-                    <label class="field-label" style="margin-bottom:6px;">邀请码管理</label>
-                    <div style="display:flex;gap:8px;margin-bottom:8px;">
-                        <button id="generateInviteBtn" type="button" style="flex:1;">生成邀请码</button>
-                    </div>
-                    <div id="inviteCodeList" style="font-size:12px;color:var(--muted);">
-                        <p id="inviteEmptyMsg">暂无有效邀请码</p>
-                    </div>
-                    <p class="status-line" id="inviteStatus" style="margin:4px 0 0;"></p>
-                    <div style="margin-top:8px;display:flex;align-items:center;gap:8px;">
-                        <span style="font-size:12px;color:var(--muted);">注册邀请码开关</span>
-                        <button id="toggleInviteBtn" type="button" style="font-size:12px;">加载中...</button>
-                    </div>
                 </div>
 
                 <div style="border-top:1px solid var(--border);padding-top:8px;margin-top:4px;">
@@ -131,20 +104,6 @@
                         <input id="inventoryUploadInput" type="file" accept=".json" hidden>
                     </label>
                 </div>
-            </div>
-
-            <div class="crawler-panel" id="crawlerPanel">
-                <div class="section-head compact-head">
-                    <h3 class="section-title">卡图下载</h3>
-                    <span class="section-count" id="crawlerModeLabel">仅本地</span>
-                </div>
-                <div class="crawler-buttons">
-                    <button id="crawlerOffBtn" type="button" class="secondary crawler-mode-btn is-active">仅本地</button>
-                    <button id="crawlerDemandBtn" type="button" class="secondary crawler-mode-btn">点开下载</button>
-                    <button id="crawlerOnBtn" type="button" class="secondary crawler-mode-btn">持续爬取</button>
-                    <button id="crawlerScheduledBtn" type="button" class="secondary crawler-mode-btn">凌晨3点</button>
-                </div>
-                <p class="status-line" id="crawlerStatus">当前：仅本地图片（不自动下载）</p>
             </div>
 
             <p class="status-line" id="deckStatus">卡组详情与编辑已移动到独立页面。</p>

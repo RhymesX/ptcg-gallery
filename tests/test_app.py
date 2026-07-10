@@ -362,7 +362,6 @@ class PtcgGalleryAppTests(unittest.TestCase):
         temp_dir, app, client = self._create_test_app(self._build_rows(include_same_name_duplicate=True))
         self.addCleanup(temp_dir.cleanup)
 
-        self.assertEqual(client.get("/holdings").status_code, 200)
         response = client.get("/api/holdings")
         self.assertEqual(response.status_code, 200)
         payload = response.get_json()

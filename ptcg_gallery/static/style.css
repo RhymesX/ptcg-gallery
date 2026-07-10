@@ -433,6 +433,18 @@ button:hover,
     gap: 16px;
 }
 
+.admin-layout {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 16px;
+}
+
+@media (max-width: 900px) {
+    .admin-layout {
+        grid-template-columns: 1fr;
+    }
+}
+
 .deck-admin-panel,
 .deck-summary-panel,
 .deck-cards-panel {
@@ -2588,5 +2600,220 @@ body.modal-open {
     box-shadow: 0 24px 80px rgba(9, 20, 41, 0.24);
     padding: 24px;
     width: 100%;
+}
+
+/* ── 退标弹窗 ──────────────────────────────────────────────── */
+
+.retire-modal-card {
+    max-width: 620px;
+    max-height: calc(100vh - 40px);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.modal-close {
+    position: absolute;
+    top: 14px;
+    right: 18px;
+    background: none;
+    border: none;
+    font-size: 22px;
+    cursor: pointer;
+    color: #6b7280;
+    line-height: 1;
+    padding: 4px 8px;
+    border-radius: 6px;
+}
+.modal-close:hover {
+    background: #f3f4f6;
+    color: #111827;
+}
+
+.modal-title {
+    font-size: 20px;
+    font-weight: 700;
+    margin: 0 0 6px 0;
+    color: #132238;
+}
+
+.retire-desc {
+    color: #6b7280;
+    font-size: 14px;
+    margin: 0 0 16px 0;
+}
+
+.retire-form {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-bottom: 20px;
+}
+
+.retire-label {
+    font-weight: 600;
+    font-size: 14px;
+    color: #374151;
+}
+
+.retire-select {
+    width: 100%;
+    padding: 10px 14px;
+    border: 1px solid #d1d5db;
+    border-radius: 10px;
+    font-size: 15px;
+    background: #fff;
+    color: #111827;
+    outline: none;
+    appearance: auto;
+}
+.retire-select:focus {
+    border-color: #6366f1;
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.12);
+}
+
+.retire-checkbox {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    color: #374151;
+    cursor: pointer;
+    user-select: none;
+}
+.retire-checkbox input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    accent-color: #6366f1;
+    flex-shrink: 0;
+}
+
+.retire-step1-footer,
+.retire-step2-footer {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 12px;
+    padding-top: 16px;
+    border-top: 1px solid #e5e7eb;
+}
+
+.retire-step2-footer {
+    justify-content: space-between;
+}
+
+.retire-card-list-header {
+    padding: 8px 0;
+    border-bottom: 1px solid #e5e7eb;
+    margin-bottom: 4px;
+}
+
+.retire-select-all {
+    font-weight: 600;
+}
+
+.retire-card-list {
+    flex: 1;
+    overflow-y: auto;
+    max-height: 420px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.retire-card-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.15s;
+}
+.retire-card-row:hover {
+    background: #f9fafb;
+}
+.retire-card-row input[type="checkbox"] {
+    width: 17px;
+    height: 17px;
+    accent-color: #6366f1;
+    flex-shrink: 0;
+}
+
+.retire-card-name {
+    flex: 1;
+    font-weight: 600;
+    font-size: 14px;
+    color: #132238;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.retire-card-code {
+    font-size: 12px;
+    color: #6b7280;
+    font-family: ui-monospace, monospace;
+    flex-shrink: 0;
+}
+
+.retire-card-rarity {
+    font-size: 12px;
+    color: #9ca3af;
+    flex-shrink: 0;
+    min-width: 20px;
+    text-align: center;
+}
+
+.retire-card-qty {
+    font-weight: 700;
+    font-size: 14px;
+    color: #374151;
+    flex-shrink: 0;
+    min-width: 36px;
+    text-align: right;
+}
+
+.retire-card-location {
+    display: flex;
+    gap: 4px;
+    flex-shrink: 0;
+    font-size: 11px;
+}
+
+.retire-loc-free {
+    background: #ecfdf5;
+    color: #059669;
+    padding: 2px 7px;
+    border-radius: 6px;
+    font-weight: 600;
+}
+
+.retire-loc-deck {
+    padding: 2px 7px;
+    border-radius: 6px;
+    font-weight: 600;
+}
+
+.retire-selected-count {
+    font-size: 14px;
+    color: #6b7280;
+}
+
+.button-link.danger {
+    background: #dc2626;
+    color: #fff;
+    border: none;
+    cursor: pointer;
+    font-size: 14px;
+    padding: 9px 20px;
+    border-radius: 10px;
+    font-weight: 600;
+    transition: background 0.15s;
+}
+.button-link.danger:hover {
+    background: #b91c1c;
 }
 

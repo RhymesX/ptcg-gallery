@@ -16,7 +16,9 @@
         </div>
         <div class="holdings-hero-actions">
             <div class="toolbar compact holdings-hero-toolbar">
+                {% if is_admin %}<a class="button-link secondary" href="/admin">管理后台</a>{% endif %}
                 <a class="button-link secondary" href="/decks">打开卡组管理</a>
+                <button type="button" class="button-link danger" id="retireBtn">退标</button>
             </div>
             <div class="stats" id="summaryCards"></div>
         </div>
@@ -72,6 +74,49 @@
             <button id="sortGroupsModalCloseBtn" type="button" class="secondary">取消</button>
         </div>
     </div>
+</div>
+
+<!-- 退标弹窗 -->
+<div class="modal-overlay" id="retireModal" style="display:none">
+  <div class="modal-card retire-modal-card" id="retireStep1">
+    <button type="button" class="modal-close" id="retireCloseBtn" aria-label="关闭">×</button>
+    <h2 class="modal-title">退标</h2>
+    <p class="retire-desc">选择要退标的赛制，系统将列出该赛制下你持有的所有卡牌。</p>
+    <div class="retire-form">
+      <label class="retire-label">赛制</label>
+      <select class="retire-select" id="retireRegulation">
+        <option value="">请选择赛制</option>
+      </select>
+      <label class="retire-checkbox">
+        <input type="checkbox" id="retireSkipSameName" checked>
+        <span>同名卡在其他赛制不删除（保护有多标版本的同名卡）</span>
+      </label>
+      <label class="retire-checkbox">
+        <input type="checkbox" id="retireIncludeDeckCards" checked>
+        <span>包含卡组中的卡牌</span>
+      </label>
+    </div>
+    <div class="retire-step1-footer">
+      <button type="button" class="button-link danger" id="retireFilterBtn">筛选卡牌</button>
+    </div>
+  </div>
+
+  <div class="modal-card retire-modal-card" id="retireStep2" style="display:none">
+    <button type="button" class="modal-close" id="retireBackBtn" aria-label="返回">←</button>
+    <h2 class="modal-title">退标 — <span id="retireRegulationLabel"></span></h2>
+    <p class="retire-desc" id="retireSummary"></p>
+    <div class="retire-card-list-header">
+      <label class="retire-checkbox retire-select-all">
+        <input type="checkbox" id="retireSelectAll" checked>
+        <span>全选</span>
+      </label>
+    </div>
+    <div class="retire-card-list" id="retireCardList"></div>
+    <div class="retire-step2-footer">
+      <span class="retire-selected-count" id="retireSelectedCount"></span>
+      <button type="button" class="button-link danger" id="retireExecuteBtn">退标</button>
+    </div>
+  </div>
 </div>
 
 <script src="{{ url_for('static', filename='inventory_table.js') }}"></script>

@@ -375,13 +375,13 @@ CREATE TABLE IF NOT EXISTS user_settings (
 
 class CardRepository:
     _account_local = threading.local()
-
     def __init__(self, db_path: str | os.PathLike[str], *, accounts_dir: str | os.PathLike[str] | None = None):
         self.db_path = str(db_path)
         self._init_admin_pass = ""
         self.search_preferences_path = Path(self.db_path).resolve().parent / SEARCH_PREFERENCES_FILE_NAME
         self.accounts_dir = str(accounts_dir) if accounts_dir else str(Path(self.db_path).resolve().parent / "accounts")
         Path(self.accounts_dir).mkdir(parents=True, exist_ok=True)
+        self._accounts_initialized: set[int] = set()
         self.initialize()
 
     def set_init_admin_pass(self, password: str):
@@ -434,7 +434,9 @@ class CardRepository:
     def connect_account(self, account_id: int):
         """连接指定用户的独立数据库，同时 ATTACH catalog 数据库为 shared。"""
         account_id = int(account_id)
-        self._init_account_db(account_id)
+        if account_id not in self._accounts_initialized:
+            self._init_account_db(account_id)
+            self._accounts_initialized.add(account_id)
         db_path = self._account_db_path(account_id)
         conn = self._connect_sqlite(db_path)
         conn.execute("ATTACH DATABASE ? AS shared", (self.db_path,))
@@ -488,7 +490,10 @@ class CardRepository:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_decks_account_sort_order ON decks(account_id, sort_order, id)")
         self._ensure_default_account_password(conn)
         for row in conn.execute("SELECT id FROM accounts ORDER BY id ASC").fetchall():
-            self._init_account_db(int(row["id"]))
+            aid = int(row["id"])
+            if aid not in self._accounts_initialized:
+                self._init_account_db(aid)
+                self._accounts_initialized.add(aid)
 
     def _ensure_default_account(self, conn: sqlite3.Connection) -> int:
         row = conn.execute("SELECT id FROM accounts WHERE name = ?", (DEFAULT_ACCOUNT_NAME,)).fetchone()
@@ -937,7 +942,14 @@ class CardRepository:
         return self.list_invite_codes()
 
     def create_bind_code(self, account_id: int) -> str:
-        """生成 6 位绑定码（5 分钟有效），供已登录 Web 用户绑定微信小程序使用。"""
+        """生成 6 位绑定码（5 分钟有效），供已登录 Web 用户绑定微信小程序使用。
+        如果账号已绑定微信，抛出 ValueError。"""
+        with self.connect_catalog() as conn:
+            row = conn.execute(
+                "SELECT wx_openid FROM accounts WHERE id = ?", (int(account_id),)
+            ).fetchone()
+            if row and (row["wx_openid"] or "").strip():
+                raise ValueError("该账号已绑定微信，无需重复绑定")
         import random
         code = str(random.randint(100000, 999999))
         expires_at = str(int(__import__('time').time()) + 300)
@@ -1015,8 +1027,8 @@ class CardRepository:
         ]
         return {"codes": codes}
 
-    def validate_and_consume_invite_code(self, code: str, account_id: int) -> bool:
-        """校验邀请码是否有效，有效则标记为已用。返回 True 表示成功。"""
+    def validate_invite_code(self, code: str) -> bool:
+        """仅校验邀请码是否有效（不消费）。"""
         clean_code = normalize_text(code).upper()
         if not clean_code:
             return False
@@ -1028,13 +1040,18 @@ class CardRepository:
                 """,
                 (clean_code,),
             ).fetchone()
-            if row is None:
-                return False
+            return row is not None
+
+    def consume_invite_code(self, code: str, account_id: int) -> None:
+        """消费邀请码（标记为已用）。仅在创建账号后调用。"""
+        clean_code = normalize_text(code).upper()
+        if not clean_code or not account_id:
+            return
+        with self.connect() as conn:
             conn.execute(
-                "UPDATE invite_codes SET used_by_account_id = ?, used_at = datetime('now') WHERE id = ?",
-                (int(account_id), row["id"]),
+                "UPDATE invite_codes SET used_by_account_id = ?, used_at = datetime('now') WHERE code = ? AND used_by_account_id IS NULL",
+                (int(account_id), clean_code),
             )
-        return True
 
     def _ensure_default_decks_for_account(self, conn: sqlite3.Connection) -> list[str]:
         created: list[str] = []
@@ -1956,6 +1973,117 @@ class CardRepository:
         with self.connect_catalog() as conn:
             self._ensure_card_exists(conn, card_id)
             conn.execute("DELETE FROM cards WHERE id = ?", (card_id,))
+
+    # ── 退标 ──────────────────────────────────────────────────────
+
+    def preview_retire_by_regulation(
+        self, regulation: str, skip_same_name: bool = True, include_deck_cards: bool = True
+    ) -> dict[str, Any]:
+        """预览指定赛制下当前用户持有的所有卡牌，用于退标确认。"""
+        target = regulation.strip().upper()
+        if not target:
+            return {"regulation": "", "decks": [], "cards": [], "totalCount": 0, "totalQuantity": 0}
+
+        with self.connect_current_account() as conn:
+            cards = conn.execute(self._search_select_sql(), ()).fetchall()
+            deck_rows = conn.execute(
+                "SELECT id, name, color FROM decks ORDER BY sort_order ASC, id ASC"
+            ).fetchall()
+            dc_rows = conn.execute(
+                """
+                SELECT dc.card_id, dc.deck_id, d.name AS deck_name, dc.quantity
+                FROM deck_cards dc
+                JOIN decks d ON d.id = dc.deck_id
+                WHERE dc.quantity > 0
+                """
+            ).fetchall()
+
+        deck_map: dict[int, dict[str, Any]] = {}
+        for row in deck_rows:
+            deck_map[row["id"]] = {"id": row["id"], "name": row["name"], "color": row["color"] or "#9ca3af"}
+
+        # (card_id, deck_id) → quantity
+        deck_card_qty: dict[tuple[int, int], int] = {}
+        for row in dc_rows:
+            deck_card_qty[(row["card_id"], row["deck_id"])] = row["quantity"]
+
+        # 1) 收集候选卡：regulation 匹配 + 有库存
+        candidates: list[dict[str, Any]] = []
+        for row in cards:
+            row_reg = normalize_text(row["regulation"]).upper()
+            if row_reg != target:
+                continue
+            free_qty = row["free_quantity"] or 0
+            deck_qty = row["deck_quantity"] or 0
+            total_qty = free_qty + deck_qty
+            if total_qty <= 0:
+                continue
+            if not include_deck_cards and deck_qty > 0:
+                continue
+            item = self._summary_from_row(row)
+            item["categoryKey"], item["categoryTitle"] = classify_card(row)
+            item["freeQuantity"] = free_qty
+            item["deckQuantity"] = deck_qty
+            item["ownedQuantity"] = total_qty
+            item["regulation"] = row_reg
+            candidates.append(item)
+
+        # 2) 同名保护
+        if skip_same_name and candidates:
+            with self.connect_catalog() as cat_conn:
+                other_names = {
+                    normalize_text(remove_card_name_variants(r["card_name"]))
+                    for r in cat_conn.execute(
+                        "SELECT DISTINCT card_name FROM cards WHERE TRIM(COALESCE(regulation,'')) <> ?",
+                        (target,),
+                    ).fetchall()
+                }
+            candidates = [
+                c for c in candidates
+                if is_pokemon_category_key(c["categoryKey"])
+                or normalize_text(remove_card_name_variants(c["cardName"])) not in other_names
+            ]
+
+        # 3) deck 分布明细
+        for c in candidates:
+            cid = c["id"]
+            c["deckBreakdown"] = [
+                {"deckId": did, "deckName": deck_map[did]["name"], "quantity": qty}
+                for (card_id, did), qty in deck_card_qty.items()
+                if card_id == cid
+            ]
+
+        total_qty = sum(c["ownedQuantity"] for c in candidates)
+        return {
+            "regulation": target,
+            "decks": list(deck_map.values()),
+            "cards": candidates,
+            "totalCount": len(candidates),
+            "totalQuantity": total_qty,
+        }
+
+    def execute_retire_cards(self, card_ids: list[int]) -> int:
+        """删除当前用户库存中的指定卡牌（不删共享目录数据）。返回删除的卡牌种数。"""
+        if not card_ids:
+            return 0
+        placeholders = ",".join("?" for _ in card_ids)
+        with self.connect_current_account() as conn:
+            dc = conn.execute(
+                f"SELECT DISTINCT deck_id FROM deck_cards WHERE card_id IN ({placeholders})",
+                tuple(card_ids),
+            ).fetchall()
+            conn.execute(f"DELETE FROM free_inventory WHERE card_id IN ({placeholders})", tuple(card_ids))
+            conn.execute(f"DELETE FROM deck_cards WHERE card_id IN ({placeholders})", tuple(card_ids))
+            conn.execute(f"DELETE FROM holdings_card_orders WHERE card_id IN ({placeholders})", tuple(card_ids))
+            # 清理没有卡牌的 deck section orders
+            for row in dc:
+                remaining = conn.execute(
+                    "SELECT COUNT(*) AS cnt FROM deck_cards WHERE deck_id = ?", (row["deck_id"],)
+                ).fetchone()
+                if remaining and remaining["cnt"] == 0:
+                    conn.execute("DELETE FROM deck_section_orders WHERE deck_id = ?", (row["deck_id"],))
+            conn.commit()
+        return len(card_ids)
 
     def import_catalog_from_excel(self, excel_path: str | os.PathLike[str]) -> dict[str, Any]:
         excel = Path(excel_path)

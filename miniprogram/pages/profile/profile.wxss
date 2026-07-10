@@ -40,6 +40,20 @@
   font-size: 30rpx;
 }
 
+.retire-btn {
+  width: 100%;
+  background: #1a1a3e;
+  color: #f87171;
+  border-radius: 12rpx;
+  font-size: 30rpx;
+  padding: 24rpx;
+  text-align: center;
+}
+
+.retire-btn[disabled] {
+  opacity: 0.5;
+}
+
 .logout-btn {
   width: 100%;
   background: #ef4444;
