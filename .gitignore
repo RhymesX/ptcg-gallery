@@ -37,6 +37,7 @@ __pycache__/
 ### ptcgGallery ###
 # 卡图缓存（服务器自己下载）
 data/card_images/
+data/card_images_user/
 # 本地数据 / 运行产物
 data/**/*.db
 data/**/*.xlsx
