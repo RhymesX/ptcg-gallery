@@ -1,9 +1,12 @@
 async function api(url, options = {}) {
-    const response = await fetch(url, {
+    const fullUrl = url.startsWith('/') ? url : ('/' + url);
+    console.log('[api]', options.method || 'GET', fullUrl, options.body);
+    const response = await fetch(fullUrl, {
         headers: { 'Content-Type': 'application/json' },
         ...options,
         body: options.body && typeof options.body === 'object' ? JSON.stringify(options.body) : options.body,
     });
+    console.log('[api] response', response.status, response.statusText);
     if (response.status === 403) throw new Error('无权操作，仅管理员可用');
     if (!response.ok) {
         let msg = `HTTP ${response.status}`;
