@@ -166,8 +166,9 @@ class ImageService:
             return uf
 
         # 2) 本地缓存
-        if _find_file(self.cache_dir, key):
-            return f"/api/images/{key}"
+        cached = _find_file(self.cache_dir, key)
+        if cached:
+            return f"/api/images/{key}{cached.suffix}"
 
         # 3) 负缓存
         if self._neg(key):

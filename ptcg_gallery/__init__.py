@@ -728,14 +728,6 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
         result = repository.import_inventory(payload)
         return jsonify(result | backup)
 
-    @app.get("/api/images/<cache_key>")
-    def serve_card_image(cache_key: str):
-        """提供本地缓存的卡牌图片文件。"""
-        image_path = image_service.get_cached_image_path(cache_key)
-        if not image_path:
-            return Response(status=404)
-        return send_file(image_path)
-
     @app.get("/api/images/lookup")
     def lookup_card_image():
         """查询卡牌图片并返回本地缓存 URL。
@@ -836,6 +828,16 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
             "currentPc": stats.get("verify_current_pc", ""),
             "history": crawler.verify_history(),
         })
+
+    @app.get("/api/images/<path:cache_key>")
+    def serve_card_image(cache_key: str):
+        """提供本地缓存的卡牌图片文件。支持无后缀和带后缀两种格式。"""
+        if "." in cache_key and not cache_key.startswith("user/"):
+            cache_key = cache_key.rsplit(".", 1)[0]
+        image_path = image_service.get_cached_image_path(cache_key)
+        if not image_path:
+            return Response(status=404)
+        return send_file(image_path)
 
     # ── 爬虫管理 ────────────────────────────────────────────
 
