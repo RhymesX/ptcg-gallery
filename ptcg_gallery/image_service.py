@@ -132,6 +132,8 @@ class ImageService:
         self._download_enabled = True  # True=按需下载, False=仅本地
 
         self._sources: list[ImageSourceFn] = []
+        self._user_index: dict[str, list[str]] = {}  # normalized_key → [相对路径, ...]
+        self._build_user_index()
 
         self._worker = threading.Thread(target=self._loop, daemon=True, name="img-dl")
         self._worker.start()
@@ -149,6 +151,10 @@ class ImageService:
 
     def is_download_enabled(self) -> bool:
         with self._lock: return self._download_enabled
+
+    def reload_user_index(self):
+        """重新扫描 card_images_user/ 子目录索引（新增图片后调用）。"""
+        self._build_user_index()
 
     def get_image_url(self, card_name: str, pc: str = "", cc: str = "") -> str | None:
         """非阻塞。缓存命中 → URL；未命中且下载启用 → 入队 → None；下载关闭 → None。"""
@@ -190,17 +196,94 @@ class ImageService:
     def _key(self, name: str, pc: str, cc: str) -> str:
         return hashlib.sha256(f"{name}|{pc}|{cc}".encode()).hexdigest()[:16]
 
+    @staticmethod
+    def _strip_variants(text: str) -> str:
+        """去掉卡名中 · 及其后面的变体后缀（·球闪、·1、·B、·獒、·冠军 等）。"""
+        # 递归：裁判·藏·闪 → 裁判·藏 → 裁判
+        if "·" in text:
+            return ImageService._strip_variants(text.rsplit("·", 1)[0])
+        return text
+
+    @staticmethod
+    def _normalize_energy(text: str) -> str:
+        """去掉基本能量名中的【】括号：基本【草】能量 → 基本草能量。"""
+        return text.replace("【", "").replace("】", "")
+
     def _user_file(self, name: str, pc: str, cc: str) -> str | None:
-        """在 card_images_user/ 中查找用户提供的图片。"""
-        for attempt in (f"{pc}-{cc}", f"{pc}_{cc}", name.strip(), f"{pc}-{name}"):
+        """在 card_images_user/ 中查找用户提供的图片（顶层 + 子目录）。"""
+        name_stripped = name.strip()
+        name_normalized = self._normalize_energy(name_stripped)
+        base_name = self._strip_variants(name_normalized).strip()
+        base_pc_name = f"{pc}-{base_name}" if base_name else ""
+        candidates = [f"{pc}-{cc}", f"{pc}_{cc}", name_stripped, name_normalized, f"{pc}-{name_stripped}", f"{pc}-{name_normalized}"]
+        if base_name and base_name != name_normalized:
+            candidates.extend([base_name, base_pc_name])
+
+        # 顶层精确匹配
+        for attempt in candidates:
             if not attempt:
                 continue
             for ext in (".jpg", ".png", ".webp"):
-                for candidate in (attempt, attempt.lower()):
-                    f = self.user_dir / f"{candidate}{ext}"
+                for cand in (attempt, attempt.lower()):
+                    f = self.user_dir / (cand + ext)
                     if f.exists():
                         return f"/api/images/user/{f.name}"
-        return None
+
+        # 子目录索引匹配
+        for pattern in candidates:
+            if not pattern:
+                continue
+            for ext in (".jpg", ".png", ".webp"):
+                key = (pattern + ext).lower()
+                paths = self._user_index.get(key)
+                if paths:
+                    # 有多个候选时优先精确匹配 card_name
+                    best = paths[0]
+                    target_stem = name_normalized.lower()
+                    base_stem = base_name.lower()
+                    for p in paths:
+                        pl = Path(p).stem.lower()
+                        if pl.endswith(target_stem):
+                            best = p
+                            break
+                    else:
+                        for p in paths:
+                            if Path(p).stem.lower().endswith(base_stem):
+                                best = p
+                                break
+                    return f"/api/images/user/{best.replace(chr(92), '/')}"
+
+    def _build_user_index(self):
+        """递归扫描 card_images_user/ 所有子目录，建立按文件名匹配的索引。"""
+        self._user_index.clear()
+        count = 0
+        for fpath in self.user_dir.rglob("*"):
+            if not fpath.is_file():
+                continue
+            stem = fpath.stem
+            ext = fpath.suffix.lower()
+            if ext not in (".jpg", ".png", ".webp"):
+                continue
+            rel = str(fpath.relative_to(self.user_dir))
+            self._add_index(f"{stem}{ext}".lower(), rel)
+            parts = stem.split("_", 2)
+            if len(parts) >= 2:
+                pc, cc = parts[0], parts[1]
+                self._add_index(f"{pc}-{cc}{ext}".lower(), rel)
+                self._add_index(f"{pc}_{cc}{ext}".lower(), rel)
+                card_name = parts[2] if len(parts) > 2 else ""
+                if card_name:
+                    self._add_index(f"{card_name}{ext}".lower(), rel)
+                    self._add_index(f"{pc}-{card_name}{ext}".lower(), rel)
+            count += 1
+        if count:
+            info(f"user index 已构建，共 {count} 文件")
+
+    def _add_index(self, key: str, rel: str):
+        if key in self._user_index:
+            self._user_index[key].append(rel)
+        else:
+            self._user_index[key] = [rel]
 
     def _neg(self, key: str) -> bool:
         now = time.monotonic()

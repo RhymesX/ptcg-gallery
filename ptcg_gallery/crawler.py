@@ -46,6 +46,7 @@ class CardCrawler(threading.Thread):
         self._mode = "off"
         self._load_mode()
         self._wake_event = threading.Event()
+        self._priority_queue: list[tuple[int, str, str, str]] = []
 
         self._stats: dict[str, Any] = {
             "total_cards": 0, "cached": 0, "zh_downloaded": 0,
@@ -74,6 +75,24 @@ class CardCrawler(threading.Thread):
 
     def stats(self) -> dict[str, Any]:
         with self._lock: return dict(self._stats)
+
+    def notify_new_cards(self, card_rows: list[tuple[int, str, str, str]]):
+        """通知爬虫有新卡牌导入，优先下载这些卡牌。
+
+        card_rows: [(id, card_name, product_code, card_code), ...]
+        """
+        with self._lock:
+            self._priority_queue.extend(card_rows)
+        self._wake_event.set()
+
+    def refresh_stats(self):
+        """立即更新 total_cards 和 cached 统计，不等待下一轮 _crawl。"""
+        import sqlite3
+        with sqlite3.connect(self.db_path) as conn:
+            total = conn.execute("SELECT COUNT(*) FROM cards").fetchone()[0]
+        cached_count = len(list(self.cache_dir.glob("*.*")))
+        with self._lock:
+            self._stats.update(total_cards=total, cached=cached_count)
 
     def stop(self):
         with self._lock:
@@ -167,13 +186,38 @@ class CardCrawler(threading.Thread):
         with self._lock:
             self._stats.update(total_cards=total, cached=cached_count, running=True)
 
+        pending = 0
+
+        # 优先处理新导入的卡牌
+        priority: list[tuple[int, str, str, str]] = []
+        with self._lock:
+            if self._priority_queue:
+                priority = list(self._priority_queue)
+                self._priority_queue.clear()
+        if priority:
+            info(f"优先下载 {len(priority)} 张新导入卡牌")
+            for cid, name, pc, cc in priority:
+                with self._lock:
+                    if not self._active or not self._running:
+                        break
+                key = self._key(name, pc, cc)
+                if self._cached(key):
+                    continue
+                with self._lock:
+                    self._stats["current_card"] = name
+                if self._fetch_one(key, name, pc, cc):
+                    pending += 1
+                    if pending % 10 == 0:
+                        info(f"新卡进度 {pending}/{len(priority)}")
+                time.sleep(INTERVAL)
+
+        # 常规全表扫描（已缓存的跳过）
         rows = conn.execute(
             "SELECT id, product_code, card_code, card_name "
             "FROM cards ORDER BY product_code ASC, id ASC"
         ).fetchall()
         conn.close()
 
-        pending = 0
         for row in rows:
             with self._lock:
                 if not self._active or not self._running:
@@ -181,9 +225,6 @@ class CardCrawler(threading.Thread):
 
             name, pc, cc = row["card_name"], row["product_code"], row["card_code"]
             key = self._key(name, pc, cc)
-
-            # 每扫描 500 张打印一次进度（含已缓存的）
-            scanned = pending + sum(1 for _ in [])
 
             if self._cached(key):
                 continue
@@ -193,28 +234,10 @@ class CardCrawler(threading.Thread):
                 self._stats["current_card"] = name
                 self._stats["cached"] = cached_count + self._stats["zh_downloaded"] + self._stats["en_downloaded"]
 
-            # 进度日志
             if pending % 50 == 0:
                 info(f"爬虫进度 {cached_count + self._stats['zh_downloaded'] + self._stats['en_downloaded']}/{total}  简中{self._stats['zh_downloaded']}  英文{self._stats['en_downloaded']}  跳过{self._stats['skipped']}")
 
-            # 1) mikmoe
-            with self._lock: self._stats["current_source"] = "mikmoe"
-            u = fetch_mikmoe_image(name, pc, cc)
-            if u and self._dl(key, u):
-                with self._lock:
-                    self._stats["zh_downloaded"] += 1
-                    self._stats["cached"] += 1
-                time.sleep(INTERVAL)
-                continue
-
-            # 2) PTCG
-            with self._lock: self._stats["current_source"] = "PTCG"
-            u = self._ptcg_url(name)
-            if u and self._dl(key, u):
-                with self._lock:
-                    self._stats["en_downloaded"] += 1
-                    self._stats["cached"] += 1
-                time.sleep(INTERVAL)
+            if self._fetch_one(key, name, pc, cc):
                 continue
 
             with self._lock: self._stats["skipped"] += 1
@@ -225,8 +248,7 @@ class CardCrawler(threading.Thread):
         if pending == 0:
             info(f"爬虫本轮完成 ({cached_count}/{total})")
         else:
-            info(f"爬虫暂停 (本轮 {pending} 张待处理, {cached_count}/{total} 已缓存)")
-        # 两轮之间休息 15s
+            info(f"爬虫本轮完成 (本次下载 {pending} 张, {self._stats['cached']}/{total} 已缓存)")
         time.sleep(15)
 
     def _key(self, name, pc, cc):
@@ -236,6 +258,30 @@ class CardCrawler(threading.Thread):
         for ext in (".jpg", ".png", ".webp"):
             if (self.cache_dir / f"{key}{ext}").exists():
                 return True
+        return False
+
+    def _fetch_one(self, key: str, name: str, pc: str, cc: str) -> bool:
+        """下载单张卡图，返回 True 表示下载成功（包含跳过已缓存）。"""
+        # 1) mikmoe
+        with self._lock:
+            self._stats["current_source"] = "mikmoe"
+        u = fetch_mikmoe_image(name, pc, cc)
+        if u and self._dl(key, u):
+            with self._lock:
+                self._stats["zh_downloaded"] += 1
+                self._stats["cached"] += 1
+            return True
+
+        # 2) PTCG
+        with self._lock:
+            self._stats["current_source"] = "PTCG"
+        u = self._ptcg_url(name)
+        if u and self._dl(key, u):
+            with self._lock:
+                self._stats["en_downloaded"] += 1
+                self._stats["cached"] += 1
+            return True
+
         return False
 
     def _dl(self, key, url):

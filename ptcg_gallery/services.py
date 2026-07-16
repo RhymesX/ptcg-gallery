@@ -2104,6 +2104,7 @@ class CardRepository:
             created = 0
             updated = 0
             skipped = 0
+            new_cards: list[tuple[int, str, str, str]] = []
             with self.connect_current_account() as conn:
                 cards_table = self._catalog_cards_table(conn)
                 for row in sheet.iter_rows(min_row=2):
@@ -2151,6 +2152,7 @@ class CardRepository:
                         )
                         card_id = cursor.lastrowid
                         self._set_free_quantity(conn, card_id, record["quantity"])
+                        new_cards.append((card_id, record["card_name"], record["product_code"], record["card_code"]))
                         created += 1
                     else:
                         card_id = existing["id"]
@@ -2203,6 +2205,8 @@ class CardRepository:
                 "skipped": skipped,
                 "path": str(excel),
                 "sheetName": sheet.title,
+                "newCardIds": [c[0] for c in new_cards],
+                "_new_cards": new_cards,  # 供路由层传递给爬虫（(id, name, pc, cc)）
             }
         finally:
             workbook.close()

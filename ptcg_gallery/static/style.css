@@ -2687,6 +2687,11 @@ body.modal-open {
     accent-color: #6366f1;
     flex-shrink: 0;
 }
+.retire-current-regulations {
+    margin: 4px 0 0 26px;
+    font-size: 13px;
+    color: #6b7280;
+}
 
 .retire-step1-footer,
 .retire-step2-footer {

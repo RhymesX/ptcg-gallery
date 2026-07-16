@@ -1030,6 +1030,18 @@ async function openRetireModal() {
         const select = document.getElementById('retireRegulation');
         select.innerHTML = '<option value="">请选择赛制</option>' +
             regulations.map(r => `<option value="${escapeHtml(r)}">${escapeHtml(r)} 标</option>`).join('');
+
+        // 显示用户当前选择的赛制
+        const prefs = opts.preferences || {};
+        const selected = prefs.selectedRegulations || [];
+        const el = document.getElementById('retireCurrentRegulations');
+        if (selected.length) {
+            el.textContent = '你当前选择的赛制：' + selected.join('、') + ' 标';
+            el.style.display = '';
+        } else {
+            el.textContent = '';
+            el.style.display = 'none';
+        }
     } catch (_) {}
 }
 

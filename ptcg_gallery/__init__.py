@@ -133,6 +133,15 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
         backup_path.write_text(dumps_state(payload), encoding="utf-8")
         return {"autoBackupPath": str(backup_path.relative_to(Path(app.config["ROOT_DIR"]))).replace("\\", "/")}
 
+    def _notify_crawler_after_import(result: dict[str, Any]):
+        """导入完成后通知爬虫：刷新统计 + 优先下载新卡。"""
+        if crawler is None:
+            return
+        new_cards = result.pop("_new_cards", None) or []
+        if new_cards:
+            crawler.notify_new_cards(new_cards)
+        crawler.refresh_stats()
+
     @app.before_request
     def _require_login():
         """除登录页、静态文件和 health 外，统一要求登录。支持 session cookie 和 JWT Bearer token 两种方式。"""
@@ -648,6 +657,7 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
     def import_catalog_default():
         backup = create_import_backup("catalog-default")
         result = repository.import_catalog_from_excel(app.config["DEFAULT_EXCEL_PATH"])
+        _notify_crawler_after_import(result)
         return jsonify(result | backup)
 
     @app.post("/api/import/catalog-upload")
@@ -663,6 +673,7 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
             result = repository.import_catalog_from_excel(temp_path)
         finally:
             Path(temp_path).unlink(missing_ok=True)
+        _notify_crawler_after_import(result)
         return jsonify(result | backup)
 
     @app.get("/api/export/state")
@@ -760,15 +771,25 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
                 result[key] = url
         return jsonify({"urls": result})
 
-    @app.get("/api/images/user/<filename>")
+    @app.get("/api/images/user/<path:filename>")
     def serve_user_image(filename: str):
-        """提供用户手动放入的简中卡牌图片文件。"""
+        """提供用户手动放入的简中卡牌图片文件（支持子目录）。"""
         user_dir = Path(app.config["DATA_DIR"]) / "card_images_user"
-        safe_name = Path(filename).name
-        image_path = user_dir / safe_name
+        image_path = (user_dir / filename).resolve()
+        # 防止路径穿越
+        if not str(image_path).startswith(str(user_dir.resolve())):
+            return Response(status=404)
         if not image_path.exists() or not image_path.is_file():
             return Response(status=404)
         return send_file(image_path)
+
+    @app.post("/api/images/reload-user-index")
+    def reload_user_image_index():
+        """重新扫描 card_images_user/ 子目录索引。"""
+        if not session.get("is_admin"):
+            return jsonify({"error": "无权操作"}), 403
+        image_service.reload_user_index()
+        return jsonify({"ok": True})
 
     # ── 爬虫管理 ────────────────────────────────────────────
 

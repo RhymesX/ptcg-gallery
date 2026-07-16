@@ -99,6 +99,12 @@ def _ensure_product_index(set_code: str) -> bool:
                 existing.append(card["cardIndex"])
             else:
                 _index[key] = [existing, card["cardIndex"]]
+            # 同时为去【】括号版本建索引（数据库可能用带括号的名字）
+            normalized = card["cardName"].replace("【", "").replace("】", "")
+            if normalized != card["cardName"]:
+                nk = (card["setCode"], normalized)
+                if nk not in _index:
+                    _index[nk] = card["cardIndex"]
         _index_timestamps[set_code] = time.monotonic()
 
     name_sample = cards[0]["cardName"] if cards else "?"
@@ -141,6 +147,13 @@ def get_card_index(product_code: str, card_name: str, card_code: str = "") -> st
     cached = _lookup(name)
     if cached is not None:
         return _pick_best(cached, cc_num)
+
+    # 【】括号 → 去括号重试（基本【妖】能量 → 基本妖能量）
+    name_no_bracket = name.replace("【", "").replace("】", "")
+    if name_no_bracket != name:
+        cached = _lookup(name_no_bracket)
+        if cached is not None:
+            return _pick_best(cached, cc_num)
 
     # 球闪后缀 → 用普通名重试
     base_name = _strip_ball_flash(name)
