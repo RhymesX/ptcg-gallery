@@ -59,6 +59,26 @@
             </div>
             <p class="status-line" id="crawlerStatus">当前：仅本地图片（不自动下载）</p>
         </section>
+
+        <section class="panel">
+            <h2>缓存图片验证</h2>
+            <p style="font-size:12px;color:var(--muted);margin-bottom:8px;">
+                逐张对比本地缓存与 mikmoe 源图，不匹配的自动删除让爬虫重新下载。
+            </p>
+            <div style="display:flex;gap:8px;margin-bottom:8px;">
+                <input id="verifyProductCodeInput" type="text" placeholder="产品编号，如 CSV10C"
+                       style="flex:1;font-size:13px;padding:4px 8px;">
+                <button id="verifyProductBtn" type="button" style="font-size:13px;">检查单个产品</button>
+            </div>
+            <button id="verifyAllBtn" type="button" class="danger">检查全部缓存（耗时较长）</button>
+            <div id="verifyResult" style="margin-top:8px;font-size:12px;color:var(--muted);">
+                <div id="verifyProgress" style="display:none;margin-bottom:4px;">
+                    <span>正在验证：</span><strong id="verifyCurrentPc"></strong>
+                </div>
+                <div id="verifyHistoryContainer" style="margin-bottom:8px;"></div>
+                <pre id="verifyOutput" style="background:var(--bg);padding:8px;border-radius:4px;overflow-x:auto;white-space:pre-wrap;display:none;"></pre>
+            </div>
+        </section>
     </main>
 </div>
 

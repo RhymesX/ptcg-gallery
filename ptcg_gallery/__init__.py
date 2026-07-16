@@ -791,6 +791,52 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
         image_service.reload_user_index()
         return jsonify({"ok": True})
 
+    @app.post("/api/images/verify-product")
+    def verify_product_images():
+        """检查指定产品的所有缓存图片是否与 mikmoe 源一致。
+        不匹配的自动删除，后续爬虫会重新下载。
+        请求体：{ productCode: "CSV10C" }
+        """
+        if not session.get("is_admin"):
+            return jsonify({"error": "无权操作"}), 403
+        if crawler is None:
+            return jsonify({"error": "爬虫未启动"}), 400
+        payload = request.get_json(force=True, silent=True) or {}
+        pc = (payload.get("productCode") or "").strip()
+        if not pc:
+            return jsonify({"error": "缺少 productCode"}), 400
+        result = crawler.verify_product_images(pc)
+        return jsonify(result)
+
+    @app.post("/api/images/verify-all")
+    def verify_all_images():
+        """全量异步检查所有缓存图片。"""
+        if not session.get("is_admin"):
+            return jsonify({"error": "无权操作"}), 403
+        if crawler is None:
+            return jsonify({"error": "爬虫未启动"}), 400
+        result = crawler.verify_all_images()
+        return jsonify(result)
+
+    @app.get("/api/images/verify-status")
+    def verify_status():
+        """获取全量验证的当前进度 + 最近3次验证历史。"""
+        if not session.get("is_admin"):
+            return jsonify({"error": "无权操作"}), 403
+        if crawler is None:
+            return jsonify({"running": False, "history": []})
+        stats = crawler.stats()
+        return jsonify({
+            "running": stats.get("verify_running", False),
+            "total": stats.get("verify_total", 0),
+            "verified": stats.get("verify_verified", 0),
+            "missing": stats.get("verify_missing", 0),
+            "removed": stats.get("verify_removed", 0),
+            "errors": stats.get("verify_errors", 0),
+            "currentPc": stats.get("verify_current_pc", ""),
+            "history": crawler.verify_history(),
+        })
+
     # ── 爬虫管理 ────────────────────────────────────────────
 
     @app.get("/api/crawler/status")

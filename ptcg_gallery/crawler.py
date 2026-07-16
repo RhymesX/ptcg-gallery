@@ -54,6 +54,7 @@ class CardCrawler(threading.Thread):
             "current_card": "", "current_source": "", "running": False,
             "mode": self._mode,
         }
+        self._verify_history: list[dict[str, Any]] = []
 
     # ── 公开 API ────────────────────────────────────────────
 
@@ -315,3 +316,197 @@ class CardCrawler(threading.Thread):
         except Exception:
             pass
         return None
+
+    def verify_all_images(self) -> dict[str, Any]:
+        """全量异步检查所有缓存图片。返回状态表示已启动。"""
+        with self._lock:
+            if self._stats.get("verify_running"):
+                return {"ok": False, "error": "已有验证任务在运行中"}
+            self._stats["verify_running"] = True
+            self._stats["verify_total"] = 0
+            self._stats["verify_verified"] = 0
+            self._stats["verify_missing"] = 0
+            self._stats["verify_removed"] = 0
+            self._stats["verify_errors"] = 0
+            self._stats["verify_current_pc"] = ""
+
+        t = threading.Thread(target=self._verify_all_worker, daemon=True, name="img-verify-all")
+        t.start()
+        return {"ok": True, "message": "全量验证已启动"}
+
+    def _verify_all_worker(self):
+        import sqlite3
+        conn = sqlite3.connect(self.db_path)
+        pcs = [r[0] for r in conn.execute(
+            "SELECT DISTINCT product_code FROM cards ORDER BY product_code"
+        ).fetchall()]
+        conn.close()
+
+        url_size_cache: dict[str, int] = {}
+        total = 0
+        verified = 0
+        missing = 0
+        removed = 0
+        errors = 0
+
+        for pc in pcs:
+            with self._lock:
+                self._stats["verify_current_pc"] = pc
+
+            import sqlite3 as _s
+            conn2 = _s.connect(self.db_path)
+            rows = conn2.execute(
+                "SELECT card_name, product_code, card_code FROM cards WHERE product_code=?",
+                (pc,)
+            ).fetchall()
+            conn2.close()
+
+            for name, pc_val, cc in rows:
+                key = self._key(name, pc_val, cc)
+                total += 1
+
+                cached = None
+                for ext in (".jpg", ".png", ".webp"):
+                    p = self.cache_dir / f"{key}{ext}"
+                    if p.exists():
+                        cached = p
+                        break
+
+                if not cached:
+                    missing += 1
+                    continue
+
+                url = fetch_mikmoe_image(name, pc_val, cc)
+                if not url:
+                    continue
+
+                verified += 1
+                if url not in url_size_cache:
+                    try:
+                        r = requests.head(url, timeout=TIMEOUT)
+                        url_size_cache[url] = int(r.headers.get("Content-Length", "0"))
+                    except Exception:
+                        errors += 1
+                        continue
+                expected = url_size_cache[url]
+
+                if expected and cached.stat().st_size != expected:
+                    cached.unlink()
+                    removed += 1
+
+            with self._lock:
+                self._stats["verify_total"] = total
+                self._stats["verify_verified"] = verified
+                self._stats["verify_missing"] = missing
+                self._stats["verify_removed"] = removed
+                self._stats["verify_errors"] = errors
+
+        with self._lock:
+            self._stats["verify_running"] = False
+            self._stats["verify_current_pc"] = ""
+
+        info("全量图片验证完成",
+             total=total, verified=verified,
+             missing=missing, removed=removed, errors=errors)
+
+        self._add_verify_history({
+            "type": "all",
+            "productCode": "*",
+            "total": total,
+            "verified": verified,
+            "missing": missing,
+            "removed": removed,
+            "errors": errors,
+        })
+
+    def verify_product_images(self, product_code: str) -> dict[str, Any]:
+        """检查指定产品的所有缓存图片是否正确。
+
+        逐个对比缓存文件与 mikmoe 源图大小，不匹配的自动删除。
+        返回统计信息。
+        """
+        import sqlite3
+
+        conn = sqlite3.connect(self.db_path)
+        rows = conn.execute(
+            "SELECT card_name, product_code, card_code FROM cards WHERE product_code=?",
+            (product_code,)
+        ).fetchall()
+        conn.close()
+
+        if not rows:
+            return {"ok": False, "error": f"产品 {product_code} 不存在或无卡牌"}
+
+        url_size_cache: dict[str, int] = {}
+        total = 0
+        verified = 0
+        missing = 0
+        removed = 0
+        errors = 0
+
+        for name, pc, cc in rows:
+            key = self._key(name, pc, cc)
+            total += 1
+
+            cached = None
+            for ext in (".jpg", ".png", ".webp"):
+                p = self.cache_dir / f"{key}{ext}"
+                if p.exists():
+                    cached = p
+                    break
+
+            if not cached:
+                missing += 1
+                continue
+
+            url = fetch_mikmoe_image(name, pc, cc)
+            if not url:
+                continue
+
+            verified += 1
+            if url not in url_size_cache:
+                try:
+                    r = requests.head(url, timeout=TIMEOUT)
+                    url_size_cache[url] = int(r.headers.get("Content-Length", "0"))
+                except Exception:
+                    errors += 1
+                    continue
+            expected = url_size_cache[url]
+
+            if expected and cached.stat().st_size != expected:
+                cached.unlink()
+                removed += 1
+
+        result = {
+            "ok": True,
+            "productCode": product_code,
+            "total": total,
+            "verified": verified,
+            "missing": missing,
+            "removed": removed,
+            "errors": errors,
+        }
+        info("产品图片验证完成", **{k: v for k, v in result.items() if k != "ok"})
+
+        self._add_verify_history({
+            "type": "product",
+            "productCode": product_code,
+            "total": total,
+            "verified": verified,
+            "missing": missing,
+            "removed": removed,
+            "errors": errors,
+        })
+
+        return result
+
+    def _add_verify_history(self, entry: dict[str, Any]):
+        entry["time"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with self._lock:
+            self._verify_history.insert(0, entry)
+            if len(self._verify_history) > 3:
+                self._verify_history = self._verify_history[:3]
+
+    def verify_history(self) -> list[dict[str, Any]]:
+        with self._lock:
+            return list(self._verify_history)

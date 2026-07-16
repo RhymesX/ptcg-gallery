@@ -46,6 +46,14 @@ const els = {
     scheduledBtn: document.getElementById('crawlerScheduledBtn'),
     modeLabel: document.getElementById('crawlerModeLabel'),
     crawlerStatus: document.getElementById('crawlerStatus'),
+    verifyProductCodeInput: document.getElementById('verifyProductCodeInput'),
+    verifyProductBtn: document.getElementById('verifyProductBtn'),
+    verifyAllBtn: document.getElementById('verifyAllBtn'),
+    verifyResult: document.getElementById('verifyResult'),
+    verifyOutput: document.getElementById('verifyOutput'),
+    verifyProgress: document.getElementById('verifyProgress'),
+    verifyCurrentPc: document.getElementById('verifyCurrentPc'),
+    verifyHistoryContainer: document.getElementById('verifyHistoryContainer'),
 };
 
 async function loadAccounts() {
@@ -223,4 +231,126 @@ function initCrawlerControls() {
 (async function init() {
     await Promise.all([loadAccounts(), loadInviteCodes(), loadInviteSetting()]);
     initCrawlerControls();
+    initVerifyControls();
 })();
+
+// ── 缓存验证 ────────────────────────────────────────────────
+
+function showVerifyResult(text) {
+    if (els.verifyResult) els.verifyResult.style.display = 'block';
+    if (els.verifyOutput) { els.verifyOutput.style.display = 'block'; els.verifyOutput.textContent = text; }
+}
+
+function renderVerifyHistory(history) {
+    if (!els.verifyHistoryContainer) return;
+    if (!history || history.length === 0) {
+        els.verifyHistoryContainer.innerHTML = '';
+        return;
+    }
+    els.verifyHistoryContainer.innerHTML = history.map(h => {
+        const label = h.type === 'all' ? '全部' : h.productCode;
+        const typeClass = h.type === 'all' ? 'color:var(--danger);' : 'color:var(--accent);';
+        return `<div style="padding:4px 8px;margin-bottom:4px;background:var(--bg);border-radius:4px;border:1px solid var(--border);">
+            <div style="display:flex;justify-content:space-between;">
+                <strong style="${typeClass}">${label}</strong>
+                <span style="font-size:11px;color:var(--muted);">${h.time}</span>
+            </div>
+            <span style="font-size:11px;">
+                共 ${h.total}  比对 ${h.verified}  无缓存 ${h.missing}  修复 ${h.removed}  错误 ${h.errors}
+            </span>
+        </div>`;
+    }).join('');
+}
+
+async function verifyProduct() {
+    const pc = (els.verifyProductCodeInput?.value || '').trim();
+    if (!pc) {
+        showVerifyResult('请输入产品编号');
+        return;
+    }
+    els.verifyProductBtn.disabled = true;
+    els.verifyProductBtn.textContent = '检查中...';
+    if (els.verifyProgress) els.verifyProgress.style.display = 'none';
+    try {
+        const result = await api('/api/images/verify-product', { method: 'POST', body: { productCode: pc } });
+        // refresh history from status endpoint
+        try {
+            const s = await api('/api/images/verify-status');
+            renderVerifyHistory(s.history);
+        } catch (_) {}
+        if (result.ok) {
+            showVerifyResult(
+                `产品 ${result.productCode} 验证完成\n` +
+                `总卡牌: ${result.total}  已比对: ${result.verified}\n` +
+                `无缓存: ${result.missing}  已删除错误: ${result.removed}  错误: ${result.errors}`
+            );
+        } else {
+            showVerifyResult('失败: ' + (result.error || '未知错误'));
+        }
+    } catch (e) {
+        showVerifyResult('请求失败: ' + e.message);
+    }
+    els.verifyProductBtn.disabled = false;
+    els.verifyProductBtn.textContent = '检查单个产品';
+}
+
+let verifyAllInterval = null;
+
+async function verifyAll() {
+    if (!confirm('确认检查全部缓存吗？这个过程可能需要十几分钟。')) return;
+    try {
+        const result = await api('/api/images/verify-all', { method: 'POST' });
+        if (!result.ok) {
+            showVerifyResult('启动失败: ' + (result.error || '未知错误'));
+            return;
+        }
+        showVerifyResult('全量验证已启动...');
+        els.verifyAllBtn.disabled = true;
+        els.verifyAllBtn.textContent = '验证中...';
+        els.verifyProgress.style.display = 'block';
+        if (verifyAllInterval) clearInterval(verifyAllInterval);
+        verifyAllInterval = setInterval(pollVerifyStatus, 2000);
+    } catch (e) {
+        showVerifyResult('请求失败: ' + e.message);
+    }
+}
+
+async function pollVerifyStatus() {
+    try {
+        const s = await api('/api/images/verify-status');
+        renderVerifyHistory(s.history);
+        if (els.verifyCurrentPc) els.verifyCurrentPc.textContent = s.currentPc || '-';
+        if (!s.running) {
+            clearInterval(verifyAllInterval);
+            verifyAllInterval = null;
+            els.verifyAllBtn.disabled = false;
+            els.verifyAllBtn.textContent = '检查全部缓存（耗时较长）';
+            els.verifyProgress.style.display = 'none';
+            showVerifyResult(
+                `全量验证完成\n` +
+                `总扫描: ${s.total}  已比对: ${s.verified}\n` +
+                `无缓存: ${s.missing}  已删除错误: ${s.removed}  错误: ${s.errors}`
+            );
+        } else {
+            let status = `验证中...  已扫描: ${s.total}  已比对: ${s.verified}`;
+            if (s.removed > 0) status += `  已删除: ${s.removed}`;
+            if (els.verifyOutput) els.verifyOutput.textContent = status;
+        }
+    } catch (_) {}
+}
+
+async function loadVerifyHistory() {
+    try {
+        const s = await api('/api/images/verify-status');
+        renderVerifyHistory(s.history);
+    } catch (_) {}
+}
+
+function initVerifyControls() {
+    els.verifyProductBtn?.addEventListener('click', verifyProduct);
+    els.verifyAllBtn?.addEventListener('click', verifyAll);
+    els.verifyProductCodeInput?.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') { event.preventDefault(); verifyProduct(); }
+    });
+    loadVerifyHistory();
+}
