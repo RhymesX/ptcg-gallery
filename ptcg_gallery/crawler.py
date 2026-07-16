@@ -420,11 +420,24 @@ class CardCrawler(threading.Thread):
         })
 
     def verify_product_images(self, product_code: str) -> dict[str, Any]:
-        """检查指定产品的所有缓存图片是否正确。
+        """异步检查指定产品的所有缓存图片。返回状态表示已启动。"""
+        with self._lock:
+            if self._stats.get("verify_running"):
+                return {"ok": False, "error": "已有验证任务在运行中"}
+            self._stats["verify_running"] = True
+            self._stats["verify_total"] = 0
+            self._stats["verify_verified"] = 0
+            self._stats["verify_missing"] = 0
+            self._stats["verify_removed"] = 0
+            self._stats["verify_errors"] = 0
+            self._stats["verify_current_pc"] = product_code
 
-        逐个对比缓存文件与 mikmoe 源图大小，不匹配的自动删除。
-        返回统计信息。
-        """
+        t = threading.Thread(target=self._verify_product_worker, args=(product_code,),
+                            daemon=True, name="img-verify-product")
+        t.start()
+        return {"ok": True, "message": f"产品 {product_code} 验证已启动"}
+
+    def _verify_product_worker(self, product_code: str):
         import sqlite3
 
         conn = sqlite3.connect(self.db_path)
@@ -433,9 +446,6 @@ class CardCrawler(threading.Thread):
             (product_code,)
         ).fetchall()
         conn.close()
-
-        if not rows:
-            return {"ok": False, "error": f"产品 {product_code} 不存在或无卡牌"}
 
         url_size_cache: dict[str, int] = {}
         total = 0
@@ -477,6 +487,13 @@ class CardCrawler(threading.Thread):
                 cached.unlink()
                 removed += 1
 
+            with self._lock:
+                self._stats["verify_total"] = total
+                self._stats["verify_verified"] = verified
+                self._stats["verify_missing"] = missing
+                self._stats["verify_removed"] = removed
+                self._stats["verify_errors"] = errors
+
         result = {
             "ok": True,
             "productCode": product_code,
@@ -498,7 +515,9 @@ class CardCrawler(threading.Thread):
             "errors": errors,
         })
 
-        return result
+        with self._lock:
+            self._stats["verify_running"] = False
+            self._stats["verify_current_pc"] = ""
 
     def _add_verify_history(self, entry: dict[str, Any]):
         entry["time"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")

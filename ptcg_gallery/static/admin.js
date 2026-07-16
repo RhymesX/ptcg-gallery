@@ -265,36 +265,53 @@ function renderVerifyHistory(history) {
     }).join('');
 }
 
+let verifyProductInterval = null;
+
 async function verifyProduct() {
     const pc = (els.verifyProductCodeInput?.value || '').trim();
     if (!pc) {
         showVerifyResult('请输入产品编号');
         return;
     }
-    els.verifyProductBtn.disabled = true;
-    els.verifyProductBtn.textContent = '检查中...';
-    if (els.verifyProgress) els.verifyProgress.style.display = 'none';
     try {
         const result = await api('/api/images/verify-product', { method: 'POST', body: { productCode: pc } });
-        // refresh history from status endpoint
-        try {
-            const s = await api('/api/images/verify-status');
-            renderVerifyHistory(s.history);
-        } catch (_) {}
-        if (result.ok) {
-            showVerifyResult(
-                `产品 ${result.productCode} 验证完成\n` +
-                `总卡牌: ${result.total}  已比对: ${result.verified}\n` +
-                `无缓存: ${result.missing}  已删除错误: ${result.removed}  错误: ${result.errors}`
-            );
-        } else {
-            showVerifyResult('失败: ' + (result.error || '未知错误'));
+        if (!result.ok) {
+            showVerifyResult('启动失败: ' + (result.error || '未知错误'));
+            return;
         }
+        showVerifyResult('产品 ' + pc + ' 验证已启动...');
+        els.verifyProductBtn.disabled = true;
+        els.verifyProductBtn.textContent = '验证中...';
+        els.verifyProgress.style.display = 'block';
+        if (els.verifyCurrentPc) els.verifyCurrentPc.textContent = pc;
+        if (verifyProductInterval) clearInterval(verifyProductInterval);
+        verifyProductInterval = setInterval(pollVerifyProductStatus.bind(null, pc), 2000);
     } catch (e) {
         showVerifyResult('请求失败: ' + e.message);
     }
-    els.verifyProductBtn.disabled = false;
-    els.verifyProductBtn.textContent = '检查单个产品';
+}
+
+async function pollVerifyProductStatus(pc) {
+    try {
+        const s = await api('/api/images/verify-status');
+        renderVerifyHistory(s.history);
+        if (!s.running) {
+            clearInterval(verifyProductInterval);
+            verifyProductInterval = null;
+            els.verifyProductBtn.disabled = false;
+            els.verifyProductBtn.textContent = '检查单个产品';
+            els.verifyProgress.style.display = 'none';
+            showVerifyResult(
+                `产品 ${pc} 验证完成\n` +
+                `总卡牌: ${s.total}  已比对: ${s.verified}\n` +
+                `无缓存: ${s.missing}  已删除错误: ${s.removed}  错误: ${s.errors}`
+            );
+        } else {
+            let status = `验证中...  已扫描: ${s.total}  已比对: ${s.verified}`;
+            if (s.removed > 0) status += `  已删除: ${s.removed}`;
+            if (els.verifyOutput) els.verifyOutput.textContent = status;
+        }
+    } catch (_) {}
 }
 
 let verifyAllInterval = null;
