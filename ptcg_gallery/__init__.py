@@ -873,6 +873,21 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
             image_service.enable_download()
         return jsonify({"ok": True, "mode": mode, "downloadEnabled": image_service.is_download_enabled()})
 
+    @app.post("/api/nicknames/reload")
+    def reload_nicknames():
+        """管理员从 Excel 重新加载昵称，无需重启服务。"""
+        if not session.get("is_admin"):
+            return jsonify({"error": "无权操作"}), 403
+        try:
+            nicknames = repository.load_nicknames_from_excel()
+            if nicknames:
+                repository.sync_nicknames_to_db(nicknames)
+                return jsonify({"ok": True, "count": len(nicknames)})
+            else:
+                return jsonify({"ok": False, "error": "未找到 nicknames.xlsx 或文件中无数据"}), 400
+        except Exception as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 500
+
     @app.errorhandler(ServiceError)
     @app.errorhandler(NotFoundError)
     @app.errorhandler(ConflictError)

@@ -126,6 +126,13 @@ function displayCardName(card) {
     return card.cardName;
 }
 
+function displayCardCode(card) {
+    if (card.showNickname && card.nickname) {
+        return card.nickname;
+    }
+    return card.displayCode || '';
+}
+
 function normalizeColor(value) {
     const text = String(value ?? '').trim();
     return text || '#edf2fb';
@@ -438,7 +445,7 @@ function renderItemCells(item, decks) {
     const background = tone.color;
     const textColor = background ? getReadableTextColor(background) : '#132238';
     const toneStyle = background ? `background: ${background}; color: ${textColor};` : '';
-    const productCode = item.displayProductCode || formatDisplayProductCode(item.productCode);
+    const productCode = (item.showNickname && item.nickname) ? item.nickname : (item.displayProductCode || formatDisplayProductCode(item.productCode));
     const regulation = item.regulation || '-';
     const freeQuantity = Number(item.freeQuantity ?? 0);
     const cells = [
@@ -596,10 +603,8 @@ function renderModalTable(group, decks) {
                     const tone = getRarityTone(item);
                     const background = tone.color;
                     const textColor = background ? getReadableTextColor(background) : '#132238';
-                    const productCode = item.displayProductCode || formatDisplayProductCode(item.productCode);
-                    const displayCode = item.displayCode || `${productCode}-${item.displayCardCode || formatDisplayCardCode(item.cardCode)}`;
                     const rarityStyle = background ? ` style="background: ${background}; color: ${textColor};"` : '';
-                    const cardName = escapeHtml(displayCardName(item));
+                    const cardName = escapeHtml(item.cardName);
                     return `
                         <tr data-card-id="${item.id}" data-card-name="${cardName}">
                             <td class="inventory-modal-order-cell">
@@ -608,7 +613,7 @@ function renderModalTable(group, decks) {
                                     <button type="button" class="inventory-modal-move-btn" data-action="move-row-down" title="下移 ${cardName}" aria-label="下移 ${cardName}">下</button>
                                 </div>
                             </td>
-                            <td class="mono inventory-modal-code-cell">${escapeHtml(displayCode)}</td>
+                            <td class="mono inventory-modal-code-cell">${escapeHtml(displayCardCode(item))}</td>
                             <td class="inventory-modal-rarity-cell"${rarityStyle}>${escapeHtml(tone.label === '-' ? '' : tone.label)}</td>
                             <td class="inventory-modal-name-cell" data-role="card-name">${cardName}</td>
                             <td class="inventory-modal-regulation-cell">${escapeHtml(item.regulation || '-')}</td>
@@ -1071,7 +1076,6 @@ function renderRetireCards() {
     updateRetireSelectedCount();
 
     list.innerHTML = cards.map((card, i) => {
-        const displayCode = card.displayCode || '';
         const deckBreakdown = card.deckBreakdown || [];
         let locationHtml = '';
         const freeQty = card.freeQuantity || 0;
@@ -1087,8 +1091,8 @@ function renderRetireCards() {
         return `
             <label class="retire-card-row">
                 <input type="checkbox" class="retire-card-check" data-index="${i}" checked>
-                <span class="retire-card-name">${escapeHtml(displayCardName(card))}</span>
-                <span class="retire-card-code">${escapeHtml(displayCode)}</span>
+                <span class="retire-card-name">${escapeHtml(card.cardName)}</span>
+                <span class="retire-card-code">${escapeHtml(displayCardCode(card))}</span>
                 <span class="retire-card-rarity">${escapeHtml(card.rarity || '-')}</span>
                 <span class="retire-card-qty">${card.ownedQuantity || 0}张</span>
                 <span class="retire-card-location">${locationHtml}</span>

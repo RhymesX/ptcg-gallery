@@ -210,13 +210,21 @@ class ImageService:
         """去掉基本能量名中的【】括号：基本【草】能量 → 基本草能量。"""
         return text.replace("【", "").replace("】", "")
 
+    @staticmethod
+    def _normalize_sep(text: str) -> str:
+        """统一分隔符：· → 空格，使 DB 中的"神奇糖果·冠军"能匹配文件名"神奇糖果 冠军"。"""
+        return text.replace("·", " ")
+
     def _user_file(self, name: str, pc: str, cc: str) -> str | None:
         """在 card_images_user/ 中查找用户提供的图片（顶层 + 子目录）。"""
         name_stripped = name.strip()
         name_normalized = self._normalize_energy(name_stripped)
+        name_space = self._normalize_sep(name_normalized)
         base_name = self._strip_variants(name_normalized).strip()
         base_pc_name = f"{pc}-{base_name}" if base_name else ""
         candidates = [f"{pc}-{cc}", f"{pc}_{cc}", name_stripped, name_normalized, f"{pc}-{name_stripped}", f"{pc}-{name_normalized}"]
+        if name_space != name_normalized:
+            candidates.extend([name_space, f"{pc}-{name_space}"])
         if base_name and base_name != name_normalized:
             candidates.extend([base_name, base_pc_name])
 
@@ -238,18 +246,21 @@ class ImageService:
                 key = (pattern + ext).lower()
                 paths = self._user_index.get(key)
                 if paths:
-                    # 有多个候选时优先精确匹配 card_name
+                    # 有多个候选时优先精确匹配 card_name（· 和空格统一后再比）
                     best = paths[0]
                     target_stem = name_normalized.lower()
+                    target_stem_alt = target_stem.replace("·", " ")
                     base_stem = base_name.lower()
+                    base_stem_alt = base_stem.replace("·", " ")
                     for p in paths:
                         pl = Path(p).stem.lower()
-                        if pl.endswith(target_stem):
+                        if pl.endswith(target_stem) or pl.endswith(target_stem_alt):
                             best = p
                             break
                     else:
                         for p in paths:
-                            if Path(p).stem.lower().endswith(base_stem):
+                            pl = Path(p).stem.lower()
+                            if pl.endswith(base_stem) or pl.endswith(base_stem_alt):
                                 best = p
                                 break
                     return f"/api/images/user/{best.replace(chr(92), '/')}"
@@ -276,6 +287,15 @@ class ImageService:
                 if card_name:
                     self._add_index(f"{card_name}{ext}".lower(), rel)
                     self._add_index(f"{pc}-{card_name}{ext}".lower(), rel)
+                    # 文件名中"·"→空格 与 DB 中"·"的交叉匹配
+                    cn_dot = card_name.replace(" ", "·")
+                    cn_space = card_name.replace("·", " ")
+                    if cn_dot != card_name:
+                        self._add_index(f"{cn_dot}{ext}".lower(), rel)
+                        self._add_index(f"{pc}-{cn_dot}{ext}".lower(), rel)
+                    if cn_space != card_name:
+                        self._add_index(f"{cn_space}{ext}".lower(), rel)
+                        self._add_index(f"{pc}-{cn_space}{ext}".lower(), rel)
             count += 1
         if count:
             info(f"user index 已构建，共 {count} 文件")

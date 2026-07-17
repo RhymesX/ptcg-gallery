@@ -47,6 +47,15 @@
         </section>
 
         <section class="panel">
+            <h2>昵称管理</h2>
+            <p style="font-size:12px;color:var(--muted);margin-bottom:8px;">
+                更新 data/nicknames.xlsx 后，点击下方按钮即可重新加载，无需重启服务。
+            </p>
+            <button id="reloadNicknamesBtn" type="button">从 Excel 重新加载昵称</button>
+            <p class="status-line" id="nicknameReloadStatus" style="margin-top:8px;"></p>
+        </section>
+
+        <section class="panel">
             <h2>卡图下载</h2>
             <div class="section-head compact-head">
                 <span class="section-count" id="crawlerModeLabel">仅本地</span>

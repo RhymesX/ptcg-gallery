@@ -102,6 +102,13 @@ function displayCardName(card) {
     return card.cardName;
 }
 
+function displayCardCode(card) {
+    if (card.showNickname && card.nickname) {
+        return card.nickname;
+    }
+    return card.displayCode || `${card.displayProductCode || card.productCode}-${card.displayCardCode || card.cardCode}`;
+}
+
 function clearLegacySearchPreferenceStorage() {
     try {
         window.localStorage.removeItem(LEGACY_SEARCH_REGULATION_STORAGE_KEY);
@@ -314,15 +321,14 @@ function renderResults() {
     }
 
     elements.resultList.innerHTML = state.results.map((card) => {
-        const displayCode = card.displayCode || `${card.displayProductCode || card.productCode}-${card.displayCardCode || card.cardCode}`;
         return `
         <article class="result-item ${card.id === state.selectedResultId ? 'active' : ''}" data-card-id="${card.id}">
             <div class="result-main">
                 ${renderCardImage(card)}
                 <div class="result-info">
                     <div class="result-title">
-                        <strong>${escapeHtml(displayCardName(card))}</strong>
-                        <span class="mono">${escapeHtml(displayCode)}</span>
+                        <strong>${escapeHtml(card.cardName)}</strong>
+                        <span class="mono">${escapeHtml(displayCardCode(card))}</span>
                     </div>
                     <div class="badges">
                         ${card.displayProductCode ? `<span class="badge">商品编号：${escapeHtml(card.displayProductCode)}</span>` : ''}
@@ -451,7 +457,7 @@ function renderCardDetail(card) {
             <div class="card-detail-info">
                 <h3 class="card-title">
                     <span>${escapeHtml(displayCardName(card))}</span>
-                    <span class="mono">${escapeHtml(card.displayCode || `${card.displayProductCode || card.productCode}-${card.displayCardCode || card.cardCode}`)}</span>
+                    <span class="mono">${escapeHtml(displayCardCode(card))}</span>
                 </h3>
                 <div class="inventory-pill-row">
                     <span class="inventory-pill">空闲 ${card.freeQuantity}</span>

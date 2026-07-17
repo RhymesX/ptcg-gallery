@@ -54,6 +54,8 @@ const els = {
     verifyProgress: document.getElementById('verifyProgress'),
     verifyCurrentPc: document.getElementById('verifyCurrentPc'),
     verifyHistoryContainer: document.getElementById('verifyHistoryContainer'),
+    reloadNicknamesBtn: document.getElementById('reloadNicknamesBtn'),
+    nicknameReloadStatus: document.getElementById('nicknameReloadStatus'),
 };
 
 async function loadAccounts() {
@@ -227,6 +229,22 @@ function initCrawlerControls() {
     loadCrawlerStatus();
     setInterval(loadCrawlerStatus, 10000);
 }
+
+// ── 昵称重载 ──────────────────────────────────────────────
+
+async function reloadNicknames() {
+    const btn = els.reloadNicknamesBtn;
+    if (btn) btn.disabled = true;
+    try {
+        const result = await api('/api/nicknames/reload', { method: 'POST' });
+        setStatus(els.nicknameReloadStatus, `已重新加载，共 ${result.count} 条昵称。`, 'success');
+    } catch (error) {
+        setStatus(els.nicknameReloadStatus, error.message, 'warning');
+    }
+    if (btn) btn.disabled = false;
+}
+
+els.reloadNicknamesBtn?.addEventListener('click', reloadNicknames);
 
 (async function init() {
     await Promise.all([loadAccounts(), loadInviteCodes(), loadInviteSetting()]);

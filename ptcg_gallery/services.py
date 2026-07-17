@@ -1058,6 +1058,8 @@ class CardRepository:
     def sync_nicknames_to_db(self, nicknames: dict[str, tuple[str, bool]]):
         """将昵称与显示开关写入 cards 表。"""
         with self.connect_catalog() as conn:
+            # 先清除旧昵称，再写入新昵称
+            conn.execute("UPDATE cards SET nickname = '', show_nickname = 0, updated_at = CURRENT_TIMESTAMP WHERE nickname != ''")
             for key, (nick, show) in nicknames.items():
                 parts = key.split("|", 2)
                 if len(parts) != 3:
@@ -1067,9 +1069,6 @@ class CardRepository:
                     "UPDATE cards SET nickname = ?, show_nickname = ?, updated_at = CURRENT_TIMESTAMP WHERE UPPER(product_code) = ? AND UPPER(card_code) = ? AND TRIM(card_name) = ?",
                     (nick, int(show), pc, cc, name),
                 )
-            # 清除已不在 Excel 中的昵称
-            if nicknames:
-                conn.execute("UPDATE cards SET nickname = '', show_nickname = 0, updated_at = CURRENT_TIMESTAMP WHERE nickname != ''")
 
     def _sync_nicknames(self):
         """从 Excel 加载昵称并同步到数据库。"""
