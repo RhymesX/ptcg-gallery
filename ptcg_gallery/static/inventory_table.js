@@ -119,6 +119,13 @@ function escapeHtml(value) {
         .replaceAll("'", '&#39;');
 }
 
+function displayCardName(card) {
+    if (card.showNickname && card.nickname) {
+        return card.nickname;
+    }
+    return card.cardName;
+}
+
 function normalizeColor(value) {
     const text = String(value ?? '').trim();
     return text || '#edf2fb';
@@ -592,7 +599,7 @@ function renderModalTable(group, decks) {
                     const productCode = item.displayProductCode || formatDisplayProductCode(item.productCode);
                     const displayCode = item.displayCode || `${productCode}-${item.displayCardCode || formatDisplayCardCode(item.cardCode)}`;
                     const rarityStyle = background ? ` style="background: ${background}; color: ${textColor};"` : '';
-                    const cardName = escapeHtml(item.cardName);
+                    const cardName = escapeHtml(displayCardName(item));
                     return `
                         <tr data-card-id="${item.id}" data-card-name="${cardName}">
                             <td class="inventory-modal-order-cell">
@@ -1080,7 +1087,7 @@ function renderRetireCards() {
         return `
             <label class="retire-card-row">
                 <input type="checkbox" class="retire-card-check" data-index="${i}" checked>
-                <span class="retire-card-name">${escapeHtml(card.cardName)}</span>
+                <span class="retire-card-name">${escapeHtml(displayCardName(card))}</span>
                 <span class="retire-card-code">${escapeHtml(displayCode)}</span>
                 <span class="retire-card-rarity">${escapeHtml(card.rarity || '-')}</span>
                 <span class="retire-card-qty">${card.ownedQuantity || 0}张</span>

@@ -19,6 +19,7 @@ from openpyxl.styles.colors import COLOR_INDEX
 
 DEFAULT_EXCEL_NAME = "卡表.xlsx"
 SEARCH_PREFERENCES_FILE_NAME = "search_preferences.json"
+NICKNAME_EXCEL_NAME = "nicknames.xlsx"
 DEFAULT_ACCOUNT_NAME = "RhymesX"
 EXPECTED_HEADERS = {
     "商品名称": "product_name",
@@ -208,6 +209,7 @@ CREATE TABLE IF NOT EXISTS cards (
     regulation TEXT DEFAULT '',
     note TEXT DEFAULT '',
     nickname TEXT DEFAULT '',
+    show_nickname INTEGER NOT NULL DEFAULT 0,
     group_sort_order INTEGER NOT NULL DEFAULT 0,
     initial_quantity INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -473,6 +475,7 @@ class CardRepository:
             self._set_db_schema_version(conn, CATALOG_DB_SCHEMA_VERSION)
             self._ensure_card_attribute_color_column(conn)
             self._ensure_card_group_sort_order_column(conn)
+            self._ensure_card_show_nickname_column(conn)
             self._ensure_deck_color_column(conn)
             self._ensure_deck_sort_order_column(conn)
             self._ensure_deck_card_backup_quantity_column(conn)
@@ -481,6 +484,7 @@ class CardRepository:
             self._ensure_account_storage(conn)
             self._normalize_supporter_wording(conn)
             self._normalize_deck_sort_order(conn)
+        self._sync_nicknames()
 
     def _ensure_account_storage(self, conn: sqlite3.Connection):
         account_id = self._ensure_default_account(conn)
@@ -679,6 +683,11 @@ class CardRepository:
         columns = {row[1] for row in conn.execute("PRAGMA table_info(cards)").fetchall()}
         if "group_sort_order" not in columns:
             conn.execute("ALTER TABLE cards ADD COLUMN group_sort_order INTEGER NOT NULL DEFAULT 0")
+
+    def _ensure_card_show_nickname_column(self, conn: sqlite3.Connection):
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(cards)").fetchall()}
+        if "show_nickname" not in columns:
+            conn.execute("ALTER TABLE cards ADD COLUMN show_nickname INTEGER NOT NULL DEFAULT 0")
 
     def _ensure_deck_color_column(self, conn: sqlite3.Connection):
         columns = {row[1] for row in conn.execute("PRAGMA table_info(decks)").fetchall()}
@@ -1009,6 +1018,64 @@ class CardRepository:
                 "INSERT OR REPLACE INTO app_settings(key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)",
                 ("registration.require_invite", value),
             )
+
+    def load_nicknames_from_excel(self) -> dict[str, tuple[str, bool]]:
+        """从 data/nicknames.xlsx 加载昵称映射。返回 {(product_code, card_code, card_name): (nickname, show_nickname)}。"""
+        excel_path = Path(self.db_path).resolve().parent / NICKNAME_EXCEL_NAME
+        if not excel_path.exists():
+            return {}
+        wb = load_workbook(excel_path, read_only=True, data_only=True)
+        try:
+            ws = wb.active
+            rows = list(ws.iter_rows(values_only=True))
+            if not rows:
+                return {}
+            header = [str(c or "").strip() for c in rows[0]]
+            try:
+                pc_idx = next(i for i, h in enumerate(header) if h and ("商品编号" in h or "product" in h.lower()))
+                cc_idx = next(i for i, h in enumerate(header) if h and ("卡牌编号" in h or "card_code" in h.lower()))
+                name_idx = next(i for i, h in enumerate(header) if h and ("卡牌名称" in h or "card_name" in h.lower()))
+                nick_idx = next(i for i, h in enumerate(header) if h and ("昵称" in h or "nickname" in h.lower()))
+                show_idx = next(i for i, h in enumerate(header) if h and ("显示" in h or "show" in h.lower()))
+            except StopIteration:
+                return {}
+            nicknames: dict[str, tuple[str, bool]] = {}
+            for row in rows[1:]:
+                if not row:
+                    continue
+                pc = normalize_text(str(row[pc_idx] or ""))
+                cc = normalize_text(str(row[cc_idx] or ""))
+                name = str(row[name_idx] or "").strip()
+                nick = str(row[nick_idx] or "").strip()
+                show = str(row[show_idx] or "").strip() if show_idx < len(row) else "0"
+                if pc and cc and name and nick:
+                    key = "|".join([pc.upper(), cc.upper(), name])
+                    nicknames[key] = (nick, show == "1")
+            return nicknames
+        finally:
+            wb.close()
+
+    def sync_nicknames_to_db(self, nicknames: dict[str, tuple[str, bool]]):
+        """将昵称与显示开关写入 cards 表。"""
+        with self.connect_catalog() as conn:
+            for key, (nick, show) in nicknames.items():
+                parts = key.split("|", 2)
+                if len(parts) != 3:
+                    continue
+                pc, cc, name = parts
+                conn.execute(
+                    "UPDATE cards SET nickname = ?, show_nickname = ?, updated_at = CURRENT_TIMESTAMP WHERE UPPER(product_code) = ? AND UPPER(card_code) = ? AND TRIM(card_name) = ?",
+                    (nick, int(show), pc, cc, name),
+                )
+            # 清除已不在 Excel 中的昵称
+            if nicknames:
+                conn.execute("UPDATE cards SET nickname = '', show_nickname = 0, updated_at = CURRENT_TIMESTAMP WHERE nickname != ''")
+
+    def _sync_nicknames(self):
+        """从 Excel 加载昵称并同步到数据库。"""
+        nicknames = self.load_nicknames_from_excel()
+        if nicknames:
+            self.sync_nicknames_to_db(nicknames)
 
     def list_invite_codes(self) -> dict[str, Any]:
         """列出所有未使用的邀请码及其过期时间。"""
@@ -1377,6 +1444,7 @@ class CardRepository:
                        c.regulation,
                        c.note,
                        c.nickname,
+                       c.show_nickname,
                                              COALESCE(hco.sort_order, c.group_sort_order, 0) AS group_sort_order,
                        COALESCE(fi.quantity, 0) AS free_quantity,
                                              dc.quantity AS deck_quantity,
@@ -2422,6 +2490,7 @@ class CardRepository:
                c.regulation,
                c.note,
                c.nickname,
+               c.show_nickname,
              COALESCE(hco.sort_order, c.group_sort_order, 0) AS group_sort_order,
                COALESCE(fi.quantity, 0) AS free_quantity,
                COALESCE(deck_totals.deck_quantity, 0) AS deck_quantity
@@ -2539,6 +2608,8 @@ class CardRepository:
             "freeQuantity": free_quantity,
             "deckQuantity": deck_quantity,
             "ownedQuantity": free_quantity + deck_quantity,
+            "nickname": row["nickname"] if "nickname" in row.keys() else "",
+            "showNickname": bool(row["show_nickname"]) if "show_nickname" in row.keys() else False,
         }
 
     def _find_card_by_catalog_identity(self, conn: sqlite3.Connection, record: dict[str, Any]) -> sqlite3.Row | None:
@@ -3084,6 +3155,7 @@ def build_card_search_texts(item: dict[str, Any]) -> set[str]:
         normalize_text(item.get("displayProductCode", "")),
         normalize_text(item.get("displayCode", "")),
         normalize_text(item.get("productCode", "")),
+        normalize_text(item.get("nickname", "")),
     }
 
     for extra_text in build_additional_product_search_texts(item):

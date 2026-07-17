@@ -95,6 +95,13 @@ function rememberPreferredDeckId(deckId) {
     }
 }
 
+function displayCardName(card) {
+    if (card.showNickname && card.nickname) {
+        return card.nickname;
+    }
+    return card.cardName;
+}
+
 function clearLegacySearchPreferenceStorage() {
     try {
         window.localStorage.removeItem(LEGACY_SEARCH_REGULATION_STORAGE_KEY);
@@ -314,7 +321,7 @@ function renderResults() {
                 ${renderCardImage(card)}
                 <div class="result-info">
                     <div class="result-title">
-                        <strong>${escapeHtml(card.cardName)}</strong>
+                        <strong>${escapeHtml(displayCardName(card))}</strong>
                         <span class="mono">${escapeHtml(displayCode)}</span>
                     </div>
                     <div class="badges">
@@ -443,7 +450,7 @@ function renderCardDetail(card) {
             ${renderCardImage(card)}
             <div class="card-detail-info">
                 <h3 class="card-title">
-                    <span>${escapeHtml(card.cardName)}</span>
+                    <span>${escapeHtml(displayCardName(card))}</span>
                     <span class="mono">${escapeHtml(card.displayCode || `${card.displayProductCode || card.productCode}-${card.displayCardCode || card.cardCode}`)}</span>
                 </h3>
                 <div class="inventory-pill-row">
