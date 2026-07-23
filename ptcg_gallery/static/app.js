@@ -1,5 +1,8 @@
 const LAST_USED_DECK_STORAGE_KEY = 'ptcgGallery:last-used-deck-id';
 const LEGACY_SEARCH_REGULATION_STORAGE_KEY = 'ptcgGallery:search-regulations';
+const SEARCH_DEBOUNCE_DELAY = 500;
+
+let activeSearchController = null;
 
 const state = {
     selectedCardId: null,
@@ -375,6 +378,7 @@ function renderRegulationFilters() {
 
     elements.searchRegulationFilters.querySelectorAll('input[type="checkbox"]').forEach((input) => {
         input.addEventListener('change', async () => {
+            debouncedSearch.cancel();
             state.selectedRegulations = Array.from(
                 elements.searchRegulationFilters.querySelectorAll('input[type="checkbox"]:checked')
             ).map((node) => node.value);
@@ -600,6 +604,7 @@ async function selectCard(cardId) {
 }
 
 async function refreshSearch(focusFirst = true) {
+    cancelActiveSearch();
     const query = elements.searchInput.value.trim();
     state.currentQuery = query;
     if (!query) {
@@ -612,6 +617,8 @@ async function refreshSearch(focusFirst = true) {
         setStatus(elements.searchStatus, `请输入关键字后再搜索。${regulationSummaryText()}`, 'normal');
         return;
     }
+    const controller = new AbortController();
+    activeSearchController = controller;
     try {
         const params = new URLSearchParams({ q: query });
         state.selectedRegulations.forEach((regulation) => {
@@ -620,7 +627,10 @@ async function refreshSearch(focusFirst = true) {
         if (state.considerSameNameRegulation) {
             params.set('considerSameNameRegulation', 'true');
         }
-        const payload = await api(`/api/search?${params.toString()}`);
+        const payload = await api(`/api/search?${params.toString()}`, { signal: controller.signal });
+        if (activeSearchController !== controller) {
+            return;
+        }
         state.results = payload.items || [];
         setStatus(elements.searchStatus, `找到 ${state.results.length} 张卡牌。当前关键字：${query}。${regulationSummaryText()}`, 'normal');
         renderResults();
@@ -628,8 +638,19 @@ async function refreshSearch(focusFirst = true) {
         state.selectedResultId = null;
         elements.cardDetail.innerHTML = state.results.length ? EMPTY_DETAIL_HTML : '<div class="empty-state">没有找到卡牌，请尝试更换关键字。</div>';
     } catch (error) {
-        setStatus(elements.searchStatus, error.message, 'warning');
+        if (error.name !== 'AbortError') {
+            setStatus(elements.searchStatus, error.message, 'warning');
+        }
+    } finally {
+        if (activeSearchController === controller) {
+            activeSearchController = null;
+        }
     }
+}
+
+function cancelActiveSearch() {
+    activeSearchController?.abort();
+    activeSearchController = null;
 }
 
 async function loadSummary() {
@@ -801,17 +822,26 @@ async function uploadFile(url, file) {
 
 function debounce(fn, delay) {
     let timer = null;
-    return (...args) => {
+    const debounced = (...args) => {
         window.clearTimeout(timer);
         timer = window.setTimeout(() => fn(...args), delay);
     };
+    debounced.cancel = () => window.clearTimeout(timer);
+    return debounced;
 }
 
-const debouncedSearch = debounce(() => refreshSearch(true), 200);
+const debouncedSearch = debounce(() => refreshSearch(true), SEARCH_DEBOUNCE_DELAY);
 
-elements.searchInput.addEventListener('input', debouncedSearch);
-elements.refreshSearchBtn.addEventListener('click', () => refreshSearch(true));
+elements.searchInput.addEventListener('input', () => {
+    cancelActiveSearch();
+    debouncedSearch();
+});
+elements.refreshSearchBtn.addEventListener('click', () => {
+    debouncedSearch.cancel();
+    refreshSearch(true);
+});
 elements.searchSameNameToggle?.addEventListener('change', async () => {
+    debouncedSearch.cancel();
     state.considerSameNameRegulation = Boolean(elements.searchSameNameToggle?.checked);
     try {
         await persistSearchPreferences();
