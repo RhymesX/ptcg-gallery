@@ -585,6 +585,7 @@ function findSectionByKey(sectionKey) {
 }
 
 function renderModalTable(group, decks) {
+    const canReorder = (group.items || []).length > 1;
     return `
         <table class="inventory-modal-table">
             <thead>
@@ -609,8 +610,15 @@ function renderModalTable(group, decks) {
                         <tr data-card-id="${item.id}" data-card-name="${cardName}">
                             <td class="inventory-modal-order-cell">
                                 <div class="inventory-modal-reorder">
-                                    <button type="button" class="inventory-modal-move-btn" data-action="move-row-up" title="上移 ${cardName}" aria-label="上移 ${cardName}">上</button>
-                                    <button type="button" class="inventory-modal-move-btn" data-action="move-row-down" title="下移 ${cardName}" aria-label="下移 ${cardName}">下</button>
+                                    ${canReorder ? `
+                                        <span
+                                            class="inventory-modal-drag-handle"
+                                            data-action="drag-row"
+                                            draggable="true"
+                                            title="拖拽调整 ${cardName} 顺序"
+                                            aria-label="拖拽调整 ${cardName} 顺序"
+                                        >≡</span>
+                                    ` : '<span class="inventory-modal-drag-placeholder">-</span>'}
                                 </div>
                             </td>
                             <td class="mono inventory-modal-code-cell">${escapeHtml(displayCardCode(item))}</td>
@@ -633,40 +641,73 @@ function renderModalTable(group, decks) {
     `;
 }
 
-function updateModalMoveButtons() {
-    const rows = Array.from(elements.modalTableWrap.querySelectorAll('tbody tr[data-card-id]'));
-    rows.forEach((row, index) => {
-        const moveUpButton = row.querySelector('[data-action="move-row-up"]');
-        const moveDownButton = row.querySelector('[data-action="move-row-down"]');
-        if (moveUpButton) {
-            moveUpButton.disabled = index === 0;
-        }
-        if (moveDownButton) {
-            moveDownButton.disabled = index === rows.length - 1;
-        }
+let modalDraggedCardId = null;
+
+function getModalRows() {
+    return Array.from(elements.modalTableWrap.querySelectorAll('tbody tr[data-card-id]'));
+}
+
+function clearModalDragState() {
+    getModalRows().forEach((row) => {
+        row.classList.remove('dragging', 'drag-over-top', 'drag-over-bottom');
     });
 }
 
-function moveModalRow(row, direction) {
-    if (!row?.parentElement) {
+function handleModalDragStart(event) {
+    const handle = event.target.closest('[data-action="drag-row"]');
+    const row = handle?.closest('tr[data-card-id]');
+    if (!handle || !row) {
+        event.preventDefault();
         return;
     }
 
-    const sibling = direction < 0 ? row.previousElementSibling : row.nextElementSibling;
-    if (!sibling) {
+    modalDraggedCardId = row.dataset.cardId;
+    row.classList.add('dragging');
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', modalDraggedCardId);
+}
+
+function handleModalDragEnd() {
+    modalDraggedCardId = null;
+    clearModalDragState();
+}
+
+function handleModalDragOver(event) {
+    if (!modalDraggedCardId) {
         return;
     }
 
-    if (direction < 0) {
-        row.parentElement.insertBefore(row, sibling);
-    } else {
-        row.parentElement.insertBefore(sibling, row);
+    const row = event.target.closest('tr[data-card-id]');
+    if (!row || row.dataset.cardId === modalDraggedCardId) {
+        return;
     }
 
-    updateModalMoveButtons();
-    setStatus(elements.modalStatus, '已调整顺序，点击“保存修改”后生效。');
-    const focusSelector = direction < 0 ? '[data-action="move-row-up"]' : '[data-action="move-row-down"]';
-    row.querySelector(focusSelector)?.focus();
+    event.preventDefault();
+    clearModalDragState();
+    const rect = row.getBoundingClientRect();
+    const insertBefore = event.clientY < rect.top + rect.height / 2;
+    row.classList.add(insertBefore ? 'drag-over-top' : 'drag-over-bottom');
+    event.dataTransfer.dropEffect = 'move';
+}
+
+function handleModalDrop(event) {
+    if (!modalDraggedCardId) {
+        return;
+    }
+
+    const targetRow = event.target.closest('tr[data-card-id]');
+    const draggedRow = elements.modalTableWrap.querySelector(`tr[data-card-id="${modalDraggedCardId}"]`);
+    if (!targetRow || !draggedRow || targetRow === draggedRow || !targetRow.parentElement) {
+        return;
+    }
+
+    event.preventDefault();
+    const rect = targetRow.getBoundingClientRect();
+    const insertBefore = event.clientY < rect.top + rect.height / 2;
+    targetRow.parentElement.insertBefore(draggedRow, insertBefore ? targetRow : targetRow.nextElementSibling);
+    clearModalDragState();
+    draggedRow.classList.add('dragging');
+    setStatus(elements.modalStatus, '已拖拽调整顺序，点击“保存修改”后生效。');
 }
 
 function openGroupEditor(groupKey) {
@@ -678,12 +719,12 @@ function openGroupEditor(groupKey) {
 
     state.activeGroupKey = groupKey;
     state.modalNeedsRefresh = false;
+    modalDraggedCardId = null;
     const displayName = getInventoryGroupName(group);
     elements.modalTitle.textContent = `修改库存：${displayName}`;
-    elements.modalSubtitle.textContent = `共 ${group.items.length} 条记录，可直接修改数量，也可以在组内上下调整顺序。`;
+    elements.modalSubtitle.textContent = `共 ${group.items.length} 条记录，可直接修改数量，也可以拖拽调整组内顺序。`;
     setStatus(elements.modalStatus, '修改后请点击“保存修改”，再手动关闭窗口刷新表格。');
     elements.modalTableWrap.innerHTML = renderModalTable(group, state.report?.decks || []);
-    updateModalMoveButtons();
     elements.modal.hidden = false;
     document.body.classList.add('modal-open');
 }
@@ -753,6 +794,7 @@ async function closeGroupEditor() {
     document.body.classList.remove('modal-open');
     state.activeGroupKey = null;
     state.modalNeedsRefresh = false;
+    modalDraggedCardId = null;
     elements.modalTableWrap.innerHTML = '';
     if (shouldRefresh) {
         await refreshInventoryTable();
@@ -867,19 +909,10 @@ function bindEvents() {
     elements.sortModalCloseBtn.addEventListener('click', sortCloseHandler);
     elements.sortModalCloseTop.addEventListener('click', sortCloseHandler);
 
-    elements.modalTableWrap.addEventListener('click', (event) => {
-        const moveButton = event.target.closest('[data-action="move-row-up"], [data-action="move-row-down"]');
-        if (!moveButton || !elements.modalTableWrap.contains(moveButton)) {
-            return;
-        }
-
-        const row = moveButton.closest('tr[data-card-id]');
-        if (!row) {
-            return;
-        }
-
-        moveModalRow(row, moveButton.dataset.action === 'move-row-up' ? -1 : 1);
-    });
+    elements.modalTableWrap.addEventListener('dragstart', handleModalDragStart);
+    elements.modalTableWrap.addEventListener('dragend', handleModalDragEnd);
+    elements.modalTableWrap.addEventListener('dragover', handleModalDragOver);
+    elements.modalTableWrap.addEventListener('drop', handleModalDrop);
 
     elements.modalSaveBtn.addEventListener('click', async () => {
         await saveGroupChanges();

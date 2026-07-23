@@ -2016,27 +2016,55 @@ button:hover,
 
 .inventory-modal-reorder {
     display: flex;
-    flex-direction: column;
-    gap: 4px;
+    align-items: center;
+    justify-content: center;
 }
 
-.inventory-modal-move-btn {
-    width: 100%;
-    min-width: 0;
-    padding: 2px 0;
+.inventory-modal-drag-handle,
+.inventory-modal-drag-placeholder {
+    width: 22px;
+    height: 22px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     border-radius: 8px;
+    font-size: 16px;
+    line-height: 1;
+}
+
+.inventory-modal-drag-handle {
     border: 1px solid var(--border);
     background: #f7faff;
     color: var(--primary);
-    font-size: 11px;
-    font-weight: 700;
-    line-height: 1.2;
-    cursor: pointer;
+    cursor: grab;
+    user-select: none;
+    transition: background 0.15s, border-color 0.15s, transform 0.12s;
 }
 
-.inventory-modal-move-btn:disabled {
-    opacity: 0.45;
-    cursor: not-allowed;
+.inventory-modal-drag-handle:hover {
+    background: #eef4ff;
+    border-color: rgba(37, 99, 235, 0.28);
+}
+
+.inventory-modal-drag-handle:active {
+    cursor: grabbing;
+    transform: scale(0.96);
+}
+
+.inventory-modal-drag-placeholder {
+    color: var(--muted);
+}
+
+.inventory-modal-table tbody tr.dragging {
+    opacity: 0.42;
+}
+
+.inventory-modal-table tbody tr.drag-over-top td {
+    box-shadow: inset 0 3px 0 #2563eb;
+}
+
+.inventory-modal-table tbody tr.drag-over-bottom td {
+    box-shadow: inset 0 -3px 0 #2563eb;
 }
 
 .inventory-modal-code-cell {
