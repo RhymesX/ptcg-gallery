@@ -319,6 +319,41 @@ class PtcgGalleryAppTests(unittest.TestCase):
             ["博士的研究（弗图博士）", "博士的研究（奥琳博士）", "博士的研究（木兰博士）"],
         )
 
+    def test_retire_preview_same_name_protection_ignores_unselected_regulations(self):
+        rows = [
+            ["训练家套装A", "CS6.5C", "070/072", "阿渡", "训练家", "支援者", "", "", "U", "F", 1, "", ""],
+            ["训练家套装B", "CSM1.5C", "049/060", "阿渡", "训练家", "支援者", "", "", "PR", "B", 0, "", ""],
+        ]
+        temp_dir, app, client = self._create_test_app(rows)
+        self.addCleanup(temp_dir.cleanup)
+
+        client.put(
+            "/api/search/preferences",
+            json={"selectedRegulations": ["G"], "considerSameNameRegulation": False},
+        )
+        response = client.get("/api/retire/preview?regulation=F&skipSameName=true&includeDeckCards=true")
+        self.assertEqual(response.status_code, 200)
+        items = response.get_json()["cards"]
+
+        self.assertEqual([item["cardName"] for item in items], ["阿渡"])
+        self.assertEqual(items[0]["regulation"], "F")
+
+    def test_retire_preview_same_name_protection_uses_selected_regulations(self):
+        rows = [
+            ["训练家套装A", "CS6.5C", "070/072", "阿渡", "训练家", "支援者", "", "", "U", "F", 1, "", ""],
+            ["训练家套装B", "CSM1.5C", "049/060", "阿渡", "训练家", "支援者", "", "", "PR", "B", 0, "", ""],
+        ]
+        temp_dir, app, client = self._create_test_app(rows)
+        self.addCleanup(temp_dir.cleanup)
+
+        client.put(
+            "/api/search/preferences",
+            json={"selectedRegulations": ["B"], "considerSameNameRegulation": False},
+        )
+        response = client.get("/api/retire/preview?regulation=F&skipSameName=true&includeDeckCards=true")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["cards"], [])
+
     def test_catalog_reload_updates_parsed_product_search_without_creating_duplicate(self):
         rows = [
             ["2023北京特典", "PROMO", "SM-P", "神奇糖果·64强", "道具", "", "", "无", "U", "标准", 1, "", ""],

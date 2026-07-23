@@ -2056,12 +2056,25 @@ class CardRepository:
     # ── 退标 ──────────────────────────────────────────────────────
 
     def preview_retire_by_regulation(
-        self, regulation: str, skip_same_name: bool = True, include_deck_cards: bool = True
+        self,
+        regulation: str,
+        skip_same_name: bool = True,
+        include_deck_cards: bool = True,
+        protected_regulations: list[str] | None = None,
     ) -> dict[str, Any]:
         """预览指定赛制下当前用户持有的所有卡牌，用于退标确认。"""
         target = regulation.strip().upper()
         if not target:
             return {"regulation": "", "decks": [], "cards": [], "totalCount": 0, "totalQuantity": 0}
+
+        selected_protected_regulations: list[str] = []
+        seen_protected_regulations: set[str] = set()
+        for regulation_name in protected_regulations or []:
+            clean_regulation = normalize_text(regulation_name).upper()
+            if not clean_regulation or clean_regulation == target or clean_regulation in seen_protected_regulations:
+                continue
+            seen_protected_regulations.add(clean_regulation)
+            selected_protected_regulations.append(clean_regulation)
 
         with self.connect_current_account() as conn:
             cards = conn.execute(self._search_select_sql(), ()).fetchall()
@@ -2108,13 +2121,18 @@ class CardRepository:
             candidates.append(item)
 
         # 2) 同名保护
-        if skip_same_name and candidates:
+        if skip_same_name and candidates and selected_protected_regulations:
             with self.connect_catalog() as cat_conn:
+                placeholders = ",".join("?" for _ in selected_protected_regulations)
                 other_names = {
-                    normalize_text(remove_card_name_variants(r["card_name"]))
-                    for r in cat_conn.execute(
-                        "SELECT DISTINCT card_name FROM cards WHERE TRIM(COALESCE(regulation,'')) <> ?",
-                        (target,),
+                    normalize_text(remove_card_name_variants(row["card_name"]))
+                    for row in cat_conn.execute(
+                        f"""
+                        SELECT DISTINCT card_name
+                        FROM cards
+                        WHERE UPPER(TRIM(COALESCE(regulation, ''))) IN ({placeholders})
+                        """,
+                        tuple(selected_protected_regulations),
                     ).fetchall()
                 }
             candidates = [

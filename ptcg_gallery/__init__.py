@@ -644,7 +644,16 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
         include_deck_cards = request.args.get("includeDeckCards", "true").lower() != "false"
         if not regulation:
             return jsonify({"regulation": "", "decks": [], "cards": [], "totalCount": 0, "totalQuantity": 0})
-        return jsonify(repository.preview_retire_by_regulation(regulation, skip_same_name, include_deck_cards))
+        preferences = repository.get_search_preferences()
+        protected_regulations = preferences.get("selectedRegulations", []) if isinstance(preferences, dict) else []
+        return jsonify(
+            repository.preview_retire_by_regulation(
+                regulation,
+                skip_same_name,
+                include_deck_cards,
+                protected_regulations=protected_regulations,
+            )
+        )
 
     @app.post("/api/retire/execute")
     def retire_execute():
