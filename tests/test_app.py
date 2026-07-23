@@ -255,13 +255,13 @@ class PtcgGalleryAppTests(unittest.TestCase):
 
     def test_basic_energy_is_visible_for_any_selected_regulation(self):
         rows = [
-            ["基础能量", "CSM2.1C", "038", "基本火能量", "普通能量", "", "普通能量", "火", "C", "", 1, "", ""],
+            ["基础能量", "CSM2.1C", "038", "基本火能量", "能量", "", "", "火", "C", "", 1, "", ""],
         ]
         temp_dir, app, client = self._create_test_app(rows)
         self.addCleanup(temp_dir.cleanup)
 
         response = client.get(
-            "/api/search?q=CSM2.1C-038&regulation=G&regulation=H&regulation=I&regulation=J"
+            "/api/search?q=CSM2.1C-038&regulation=G&regulation=H&regulation=I&regulation=J&considerSameNameRegulation=true"
         )
         self.assertEqual(response.status_code, 200)
         items = response.get_json()["items"]

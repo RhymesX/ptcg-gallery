@@ -53,6 +53,8 @@ data/**/*.json
 # Claude Code 项目辅助文件（不上传服务器）
 CLAUDE.md
 .claude/
+# Codex 项目辅助说明（不上传服务器）
+AGENTS.md
 
 # 微信小程序开发者工具私有配置
 miniprogram/project.private.config.json

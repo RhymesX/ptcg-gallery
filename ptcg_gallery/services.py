@@ -35,7 +35,7 @@ EXPECTED_HEADERS = {
     "数量": "quantity",
     "备注": "note",
 }
-EXACT_CODE_PATTERN = re.compile(r"^\s*([A-Za-z0-9]+(?:-[A-Za-z0-9]+)*)\s*-\s*([A-Za-z0-9]+)\s*$")
+EXACT_CODE_PATTERN = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)\s*-\s*([A-Za-z0-9]+)\s*$")
 PROMO_PRODUCT_KEYWORD = "PROMO"
 PROMO_NUMBERED_CARD_CODE_PATTERN = re.compile(r"^\s*(\d+)\s*/\s*([A-Za-z]+-[A-Za-z]+)\s*$", re.IGNORECASE)
 PROMO_SERIES_CARD_CODE_PATTERN = re.compile(r"^\s*([A-Za-z]+-[A-Za-z]+)\s*$", re.IGNORECASE)
@@ -3213,11 +3213,15 @@ def build_additional_product_search_texts(item: dict[str, Any]) -> set[str]:
 
 def is_basic_energy_search_item(item: dict[str, Any]) -> bool:
     """基本能量不绑定具体赛制，赛制筛选时始终可用。"""
-    text = " ".join(
-        normalize_text(item.get(field, ""))
-        for field in ("cardType", "detail", "special")
+    category_key, _ = classify_card(
+        {
+            "card_type": item.get("cardType", ""),
+            "detail": item.get("detail", ""),
+            "card_name": item.get("cardName", ""),
+            "special_text": item.get("special", ""),
+        }
     )
-    return "普通能量" in text and "特殊能量" not in text
+    return category_key == "basic_energy"
 
 
 def build_search_item_same_name_key(item: dict[str, Any]) -> str:
