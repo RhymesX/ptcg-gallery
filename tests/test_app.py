@@ -253,6 +253,20 @@ class PtcgGalleryAppTests(unittest.TestCase):
         self.assertEqual(mixed_response.status_code, 200)
         self.assertCountEqual([item["regulation"] for item in mixed_response.get_json()["items"]], ["标准", "无限"])
 
+    def test_basic_energy_is_visible_for_any_selected_regulation(self):
+        rows = [
+            ["基础能量", "CSM2.1C", "038", "基本火能量", "普通能量", "", "普通能量", "火", "C", "", 1, "", ""],
+        ]
+        temp_dir, app, client = self._create_test_app(rows)
+        self.addCleanup(temp_dir.cleanup)
+
+        response = client.get(
+            "/api/search?q=CSM2.1C-038&regulation=G&regulation=H&regulation=I&regulation=J"
+        )
+        self.assertEqual(response.status_code, 200)
+        items = response.get_json()["items"]
+        self.assertEqual([item["cardName"] for item in items], ["基本火能量"])
+
     def test_search_preferences_are_persisted_to_local_file(self):
         response = self.client.put(
             "/api/search/preferences",

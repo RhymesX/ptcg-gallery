@@ -1774,6 +1774,10 @@ class CardRepository:
 
         items = [self._summary_from_row(row) for row in rows]
         if selected_regulations:
+            all_items = items
+            basic_energy_ids = {
+                item["id"] for item in all_items if is_basic_energy_search_item(item)
+            }
             allowed_regulations = set(selected_regulations)
             if consider_same_name_regulation:
                 same_name_regulations: dict[str, set[str]] = {}
@@ -1799,6 +1803,14 @@ class CardRepository:
                 ]
             else:
                 items = [item for item in items if normalize_text(item.get("regulation", "")) in allowed_regulations]
+
+            # 基本能量不受赛制轮换限制，始终保留在搜索结果中。
+            matched_ids = {item["id"] for item in items}
+            items = [
+                item
+                for item in all_items
+                if item["id"] in matched_ids or item["id"] in basic_energy_ids
+            ]
 
         exact_match = EXACT_CODE_PATTERN.match(clean_query)
         if exact_match:
@@ -3197,6 +3209,15 @@ def build_additional_product_search_texts(item: dict[str, Any]) -> set[str]:
         texts.add(f"{series_match.group(1).upper()}{raw_card_name}")
 
     return texts
+
+
+def is_basic_energy_search_item(item: dict[str, Any]) -> bool:
+    """基本能量不绑定具体赛制，赛制筛选时始终可用。"""
+    text = " ".join(
+        normalize_text(item.get(field, ""))
+        for field in ("cardType", "detail", "special")
+    )
+    return "普通能量" in text and "特殊能量" not in text
 
 
 def build_search_item_same_name_key(item: dict[str, Any]) -> str:
