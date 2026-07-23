@@ -6,7 +6,7 @@
 - 用 SQLite 持久化库存与卡组数据
 - 用浏览器完成搜索、库存维护、卡组管理与状态备份
 
-这个项目适合先在本机单人使用，后续再考虑迁移到服务器部署。
+项目支持本机使用，也可以使用 Waitress + Nginx 部署到服务器。当前版本采用共享卡牌目录库和每用户独立业务库的拆库结构。
 
 ---
 
@@ -155,6 +155,29 @@
 - **前端**：原生 HTML + CSS + JavaScript
 - **测试**：Python `unittest`
 
+补充：`PyJWT` 用于微信小程序登录令牌，`requests` 用于卡图服务；当前 `run.py` 默认监听 `127.0.0.1:8000`，不读取 `PTCG_HOST` 或 `PTCG_PORT` 环境变量。部署时可通过 `PTCG_SECRET_KEY` 固定 Flask session 和微信 JWT 使用的密钥。
+
+---
+
+## 当前数据架构
+
+当前版本不是所有业务数据都存放在同一个 SQLite 文件中，而是：
+
+```text
+data/
+├─ ptcg_gallery.db       共享目录库：cards、accounts、邀请码等
+├─ accounts/
+│  ├─ <account_id>.db    用户业务库：库存、卡组、排序、搜索偏好
+│  └─ ...
+├─ 卡表.xlsx              默认卡表（可选）
+├─ nicknames.xlsx         卡牌昵称表（可选）
+├─ card_images/           自动下载的卡图缓存
+├─ card_images_user/      用户手动放入的卡图
+└─ backups/               导入和迁移时生成的备份
+```
+
+卡牌目录共享；空闲库存、卡组、卡组排序、持有页排序和搜索偏好按用户隔离。旧版单库迁移请使用 `scripts/migrate_split_db.py`，再用 `scripts/verify_account_dbs.py` 校验，详细步骤见 `docs/db_split_local_checklist.md` 和 `docs/deployment.md`。
+
 ---
 
 ## 本地运行前需要安装什么软件
@@ -192,7 +215,13 @@ ptcgGalleryWeb/
 ├─ ptcg_gallery/
 │  ├─ __init__.py              Flask 应用工厂、页面路由、API 路由、错误处理
 │  ├─ services.py              核心业务：SQLite、Excel 导入、库存/卡组逻辑、分类逻辑
+│  ├─ image_service.py         卡图查找、缓存与按需下载
+│  ├─ crawler.py               后台卡图爬虫与缓存验证
+│  ├─ mikmoe_source.py         mikmoe 卡图源适配
+│  ├─ card_translations.py     中文卡名到英文 API 查询名的映射
+│  ├─ wx_auth.py               微信登录 JWT 工具
 │  ├─ static/
+│  │  ├─ admin.js              管理后台交互
 │  │  ├─ app.js                首页搜索、库存操作、导入导出交互
 │  │  ├─ decks.js              卡组管理页交互
 │  │  ├─ deck_detail.js        卡组详情页交互
@@ -201,12 +230,17 @@ ptcgGalleryWeb/
 │  │  └─ style.css             全站样式
 │  └─ templates/
 │     ├─ index.html            首页：搜索、详情、导入导出入口
+│     ├─ admin.html             管理后台
+│     ├─ login.html             登录与注册
 │     ├─ decks.html            卡组管理页
 │     ├─ deck_detail.html      卡组详情页
 │     ├─ inventory_table.html  库存表格页
 │     └─ holdings.html         总持有页
 ├─ tests/
 │  └─ test_app.py              接口与业务流程测试
+├─ miniprogram/                 微信小程序前端
+├─ scripts/                     拆库迁移与校验脚本
+├─ docs/                        部署、迁移和卡图说明
 ├─ requirements.txt            Python 依赖
 ├─ run.py                      启动入口
 └─ README.md                   项目说明
@@ -344,6 +378,8 @@ ptcgGalleryWeb/
 | GET | `/api/crawler/status` | 爬虫状态 |
 | PUT | `/api/crawler/mode` | 设置爬虫模式 |
 
+管理员和扩展接口还包括：账号/邀请码管理、`/api/settings/registration` 注册开关、`/api/retire/preview` 和 `/api/retire/execute` 卡牌退役、`/api/images/lookup-batch` 批量卡图查询、`/api/images/verify-product` 和 `/api/images/verify-all` 卡图缓存验证、`/api/nicknames/reload` 昵称重载，以及 `/api/wx/login`、`/api/wx/bind` 微信登录接口。需要管理员权限的接口会由 session 或 JWT 认证保护。
+
 ---
 
 ## 数据模型说明
@@ -356,11 +392,11 @@ ptcgGalleryWeb/
 
 ### `accounts`
 
-存放账号信息，包含密码哈希（SHA-256 PBKDF2）。管理员账号固定为 "RhymesX"。
+存放共享的账号信息，包含密码哈希和微信 OpenID。系统会确保存在内置账号 `RhymesX`；管理员登录身份会映射到该账号，但管理员登录名由 `data/auth.json` 配置。
 
 ### `free_inventory`
 
-存放每张卡在当前账号下的**空闲库存**（`account_id + card_id` 联合主键）。
+旧版共享库中的空闲库存表带有 `account_id`。当前拆库架构下，用户库中的 `free_inventory` 以 `card_id` 为主键，每个用户对应 `data/accounts/<account_id>.db`。
 
 ### `decks`
 
@@ -376,7 +412,7 @@ ptcgGalleryWeb/
 
 ### `holdings_group_orders` / `deck_section_orders`
 
-存放同名卡组和卡组分区的拖拽排序顺序。
+存放同名卡组和卡组分区的拖拽排序顺序；用户库还保存持有页单卡排序和用户搜索偏好。
 
 ### `app_settings`
 
@@ -390,14 +426,15 @@ ptcgGalleryWeb/
 
 主要包括：
 
-- `data/ptcg_gallery.db`：SQLite 数据库文件，库存、卡组、基础能量数量都在这里
+- `data/ptcg_gallery.db`：共享卡牌目录、账号和邀请码
+- `data/accounts/<account_id>.db`：对应账号的库存、卡组、基础能量和排序数据
 - `data/卡表.xlsx`：默认卡表文件，启动时可自动导入，也可后续手动更新
 - 你从网页导出的 JSON 状态文件：默认会落到浏览器的下载目录，位置取决于你的浏览器设置
 
 需要注意：
 
-- 只要保留 `data/ptcg_gallery.db`，你的库存和卡组状态就还在
-- 如果删掉这个数据库文件，下次启动会按“全新库”处理
+- 迁移或备份时必须同时保留 `data/ptcg_gallery.db` 和 `data/accounts/`，只保留主库不能恢复用户库存和卡组
+- 如果删除主库或用户库，应用会重新初始化缺失的数据，删除前务必先备份
 - 如果想迁移到另一台机器，最简单的方式是复制整个 `data/` 目录，或者先导出 JSON 再导入
 
 ---
@@ -480,9 +517,9 @@ data/卡表.xlsx
 
 导入状态时会：
 
-1. 清空当前 `deck_cards`、`free_inventory`、`decks`
-2. 根据 JSON 重新建立卡组
-3. 将库存数量和卡组数量回填到数据库
+1. 为当前用户的库存和卡组数据创建自动备份
+2. 清空当前用户的库存、卡组及相关排序数据
+3. 根据 JSON 重新建立卡组、基础能量和库存数量
 4. 最后再次确保默认卡组存在
 
 也就是说：**状态导入会覆盖当前库存/卡组状态**，使用前建议先导出备份。
@@ -505,7 +542,7 @@ data/卡表.xlsx
 ### Windows PowerShell
 
 ```powershell
-Set-Location "F:\ptcgGallery\ptcgGalleryWeb"
+Set-Location "<项目目录>"
 py -3.11 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 .\.venv\Scripts\python.exe run.py
@@ -590,7 +627,7 @@ http://127.0.0.1:8000
 如果你只是想把项目跑起来，核心就是 4 步：
 
 1. 安装 Python 3.11+
-2. 安装依赖 `pip install -r requirements.txt`
+2. 使用虚拟环境安装依赖 `.venv\Scripts\python.exe -m pip install -r requirements.txt`
 3. 运行 `run.py`
 4. 浏览器打开 `http://127.0.0.1:8000`，用管理员账号登录
 
@@ -620,7 +657,7 @@ Set-Location "F:\ptcgGallery\ptcgGalleryWeb"
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-本 README 编写时，以上测试已在本地虚拟环境中验证通过。
+当前测试使用临时目录和临时数据库，不会修改生产数据；运行方式以本节命令为准。拆库迁移相关的辅助脚本还可单独运行：`scripts/migrate_split_db.py` 和 `scripts/verify_account_dbs.py`。
 
 ---
 

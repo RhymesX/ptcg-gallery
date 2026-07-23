@@ -26,6 +26,7 @@ from typing import Any, Callable
 import requests
 
 from .app_log import debug, error, info, warning
+from .card_translations import translate_card_name
 from .mikmoe_source import fetch_mikmoe_image  # 简中卡图源
 
 PTCG_API = "https://api.pokemontcg.io/v2"
@@ -34,6 +35,7 @@ USER_DIR = "card_images_user"
 TIMEOUT = 5  # PTCG API 单次请求超时
 INTERVAL = 0.5  # 任务间隔（秒）
 API_CACHE_TTL = 60  # 同英文名 API 结果缓存（秒）
+IMAGE_CACHE_KEY_VERSION = "v2"
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -49,10 +51,15 @@ def source_ptcg_api(card_name: str, product_code: str, card_code: str) -> str | 
     if not clean:
         return None
 
+    card_number = _extract_card_number(card_code)
+
     # 中→英翻译后精确搜索（主策略）
     en = translate_card_name(clean)
     if en:
-        url = _api_find(f'name:"{en}"')
+        query = f'name:"{en}"'
+        if card_number:
+            query += f' number:{card_number}'
+        url = _api_find(query)
         if url:
             return url
 
@@ -61,7 +68,10 @@ def source_ptcg_api(card_name: str, product_code: str, card_code: str) -> str | 
     if s and s != clean:
         en2 = translate_card_name(s)
         if en2:
-            url = _api_find(f'name:"{en2}"')
+            query = f'name:"{en2}"'
+            if card_number:
+                query += f' number:{card_number}'
+            url = _api_find(query)
             if url:
                 return url
 
@@ -95,6 +105,20 @@ def _api_get(path: str, params: dict[str, Any] | None = None) -> Any:
     except Exception as exc:
         debug("PTCG API 失败", error=str(exc))
         return None
+
+
+def _extract_card_number(card_code: str) -> str | None:
+    """提取卡牌编号，用于英文 API 的 number 查询。"""
+    text = str(card_code or "").strip()
+    if not text:
+        return None
+    slash_match = re.search(r"(\d+)\s*/", text)
+    if slash_match:
+        return str(int(slash_match.group(1)))
+    numbers = re.findall(r"\d+", text)
+    if not numbers:
+        return None
+    return str(int(numbers[-1]))
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -195,7 +219,8 @@ class ImageService:
     # ── 内部 ────────────────────────────────────────────────
 
     def _key(self, name: str, pc: str, cc: str) -> str:
-        return hashlib.sha256(f"{name}|{pc}|{cc}".encode()).hexdigest()[:16]
+        raw = f"{IMAGE_CACHE_KEY_VERSION}|{name}|{pc}|{cc}"
+        return hashlib.sha256(raw.encode()).hexdigest()[:16]
 
     @staticmethod
     def _strip_variants(text: str) -> str:
@@ -221,12 +246,24 @@ class ImageService:
         name_normalized = self._normalize_energy(name_stripped)
         name_space = self._normalize_sep(name_normalized)
         base_name = self._strip_variants(name_normalized).strip()
-        base_pc_name = f"{pc}-{base_name}" if base_name else ""
-        candidates = [f"{pc}-{cc}", f"{pc}_{cc}", name_stripped, name_normalized, f"{pc}-{name_stripped}", f"{pc}-{name_normalized}"]
-        if name_space != name_normalized:
-            candidates.extend([name_space, f"{pc}-{name_space}"])
-        if base_name and base_name != name_normalized:
-            candidates.extend([base_name, base_pc_name])
+        card_number = _extract_card_number(cc)
+        has_card_code = bool(pc.strip() and cc.strip() and card_number)
+        if has_card_code:
+            # 有完整编号时严禁按卡名匹配，否则同名的 SR/UR 会共用一张本地图片。
+            code_variants = [cc, cc.split("/", 1)[0].strip()]
+            code_variants.extend([cc.replace("/", "-"), cc.replace("/", "_")])
+            code_variants = list(dict.fromkeys(item for item in code_variants if item))
+            candidates = [f"{pc}-{code}" for code in code_variants]
+            candidates.extend(f"{pc}_{code}" for code in code_variants)
+        else:
+            # 无数字卡牌编号的 PROMO、基础能量等，只允许产品号 + 卡名匹配。
+            candidates = []
+            if pc.strip() and name_stripped:
+                candidates.extend([f"{pc}-{name_stripped}", f"{pc}-{name_normalized}"])
+                if name_space != name_normalized:
+                    candidates.append(f"{pc}-{name_space}")
+                if base_name and base_name != name_normalized:
+                    candidates.append(f"{pc}-{base_name}")
 
         # 顶层精确匹配
         for attempt in candidates:

@@ -16,10 +16,11 @@
 
 | 顺序 | 格式 | 示例 | 适用场景 |
 |------|------|------|---------|
-| 1 | `{product_code}-{card_name}.png` | `PROMO9-神奇糖果.png` | PROMO无数字编号的卡 |
-| 2 | `{product_code}-{card_code}.jpg` | `CSM1aC-002.jpg` | 标准产品 |
-| 3 | `{product_code}_{card_code}.png` | `CSM1aC_002.png` | 同上的替代格式 |
-| 4 | `{card_name}.webp` | `小火龙.webp` | 用卡名匹配 |
+| 1 | `{product_code}-{card_code}.jpg` | `CSM1aC-002.jpg` | 有数字编号的标准卡 |
+| 2 | `{product_code}_{card_code}.png` | `CSM1aC_002.png` | 同上的替代格式 |
+| 3 | `{product_code}-{card_name}.png` | `PROMO9-神奇糖果.png` | 无数字编号的 PROMO/基础能量 |
+
+带有数字卡牌编号时，系统不会再使用仅卡名或产品号+卡名匹配。这样可以避免同名的普通、SR、UR 等变体共用同一张本地图片。文件名中的 `205/165` 可以写成 `205`，例如 `SV4a-205.png`。
 
 **PROMO 无数字编号命名示例（不同变体不混用）**：
 

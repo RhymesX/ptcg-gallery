@@ -17,6 +17,7 @@ API 端点: POST /api/v3/card/product-detail
 from __future__ import annotations
 
 import hashlib
+import re
 import threading
 import time
 from pathlib import Path
@@ -30,6 +31,7 @@ MIKMOE_API = "https://tcg.mik.moe/api/v3"
 CDN_BASE = "https://tcg.mik.moe/static/img"
 REQUEST_INTERVAL = 2.0  # 请求间隔（秒），尊重对方服务器
 INDEX_CACHE_TTL = 86400  # 产品索引缓存 24 小时
+CACHE_KEY_VERSION = "v2"
 
 HEADERS = {
     "User-Agent": "ptcg-gallery/1.0 (personal use; contact via GitHub)",
@@ -184,15 +186,18 @@ def _pick_best(cached: str | list[str] | None, card_code: str) -> str | None:
     """从索引结果中选出匹配 card_code 编号的 cardIndex。"""
     if cached is None:
         return None
-    if isinstance(cached, str):
-        return cached
     cc_num = _extract_number(card_code)
+    if isinstance(cached, str):
+        if not cc_num or _extract_number(cached) == cc_num:
+            return cached
+        return None
     if not cc_num:
         return cached[0]
     for idx in cached:
         if _extract_number(idx) == cc_num:
             return idx
-    return cached[0]
+    # 有明确卡牌编号但索引没有对应项时，不能回退到同名卡的第一张。
+    return None
 
 
 # ── 卡名净化 ──────────────────────────────────────────────────
@@ -222,9 +227,15 @@ def _strip_card_name_parens(name: str) -> str:
 
 
 def _extract_number(code: str) -> str | None:
-    """'054/072' → '54', '081' → '81'。非数字返回 None。"""
-    part = code.strip().split("/")[0].lstrip("0")
-    return part if part.isdigit() else None
+    """提取卡牌编号，例如 054/072、SV4a-205、081。"""
+    text = code.strip()
+    slash_match = re.search(r"(\d+)\s*/", text)
+    if slash_match:
+        return str(int(slash_match.group(1)))
+    numbers = re.findall(r"\d+", text)
+    if not numbers:
+        return None
+    return str(int(numbers[-1]))
 
 
 # ── product_code 规范化 ──────────────────────────────────────
@@ -319,7 +330,7 @@ def fetch_mikmoe_image(card_name: str, product_code: str, card_code: str) -> str
 
 def build_cache_key(card_name: str, product_code: str, card_code: str) -> str:
     """生成缓存 key（与 ImageService 兼容）。"""
-    raw = f"{card_name}|{product_code}|{card_code}"
+    raw = f"{CACHE_KEY_VERSION}|{card_name}|{product_code}|{card_code}"
     return hashlib.sha256(raw.encode()).hexdigest()[:16]
 
 
