@@ -597,6 +597,7 @@ function renderModalTable(group, decks) {
                     <th>赛制</th>
                     <th class="inventory-modal-qty-head">空闲</th>
                     ${decks.map((deck) => `<th class="inventory-modal-qty-head">${escapeHtml(deck.name)}</th>`).join('')}
+                    <th class="inventory-modal-delete-head">操作</th>
                 </tr>
             </thead>
             <tbody>
@@ -633,6 +634,15 @@ function renderModalTable(group, decks) {
                                     <input type="number" class="inventory-modal-input inventory-modal-qty-input" data-role="deck-quantity" data-deck-id="${deck.id}" min="0" step="1" value="${Number(item.deckQuantities?.[deck.name] ?? 0)}" style="min-width:52px;width:52px">
                                 </td>
                             `).join('')}
+                            <td class="inventory-modal-delete-cell">
+                                <button
+                                    type="button"
+                                    class="inventory-modal-delete-btn"
+                                    data-action="delete-row-card"
+                                    title="删除 ${cardName}"
+                                    aria-label="删除 ${cardName}"
+                                >删除</button>
+                            </td>
                         </tr>
                     `;
                 }).join('')}
@@ -801,6 +811,23 @@ async function closeGroupEditor() {
     }
 }
 
+async function deleteInventoryTableCard(cardId, cardName) {
+    if (!cardId) {
+        return;
+    }
+    if (!confirm(`确认删除卡牌“${cardName}”？此操作不可撤销。`)) {
+        return;
+    }
+
+    try {
+        await api(`/api/cards/${cardId}`, { method: 'DELETE' });
+        state.modalNeedsRefresh = true;
+        await closeGroupEditor();
+    } catch (error) {
+        setStatus(elements.modalStatus, error.message, 'warning');
+    }
+}
+
 async function refreshInventoryTable() {
     const [summary, report] = await Promise.all([
         api('/api/summary'),
@@ -913,6 +940,22 @@ function bindEvents() {
     elements.modalTableWrap.addEventListener('dragend', handleModalDragEnd);
     elements.modalTableWrap.addEventListener('dragover', handleModalDragOver);
     elements.modalTableWrap.addEventListener('drop', handleModalDrop);
+    elements.modalTableWrap.addEventListener('click', async (event) => {
+        const deleteButton = event.target.closest('[data-action="delete-row-card"]');
+        if (!deleteButton || !elements.modalTableWrap.contains(deleteButton)) {
+            return;
+        }
+
+        const row = deleteButton.closest('tr[data-card-id]');
+        if (!row) {
+            return;
+        }
+
+        await deleteInventoryTableCard(
+            Number(row.dataset.cardId),
+            row.dataset.cardName || row.querySelector('[data-role="card-name"]')?.textContent?.trim() || '卡牌',
+        );
+    });
 
     elements.modalSaveBtn.addEventListener('click', async () => {
         await saveGroupChanges();
@@ -1062,6 +1105,8 @@ async function saveSortGroupsOrder() {
 // ── 退标弹窗 ────────────────────────────────────────────────────
 
 let retireData = null;
+let retireSelectedRegulations = [];
+const RETIRE_FULL_INVENTORY_VALUE = '__full__';
 
 async function openRetireModal() {
     const modal = document.getElementById('retireModal');
@@ -1073,19 +1118,20 @@ async function openRetireModal() {
         const opts = await api('/api/search/options');
         const regulations = opts.regulations || [];
         const select = document.getElementById('retireRegulation');
-        select.innerHTML = '<option value="">请选择赛制</option>' +
+        select.innerHTML = `<option value="${RETIRE_FULL_INVENTORY_VALUE}">全库存（按当前已选赛制）</option>` +
             regulations.map(r => `<option value="${escapeHtml(r)}">${escapeHtml(r)} 标</option>`).join('');
+        select.value = RETIRE_FULL_INVENTORY_VALUE;
 
-        // 显示用户当前选择的赛制
         const prefs = opts.preferences || {};
-        const selected = prefs.selectedRegulations || [];
+        const selected = Array.isArray(prefs.selectedRegulations) ? prefs.selectedRegulations : [];
+        retireSelectedRegulations = selected;
         const el = document.getElementById('retireCurrentRegulations');
         if (selected.length) {
-            el.textContent = '你当前选择的赛制：' + selected.join('、') + ' 标';
+            el.textContent = '全库存模式将按当前已选赛制检测：' + selected.join('、') + ' 标';
             el.style.display = '';
         } else {
-            el.textContent = '';
-            el.style.display = 'none';
+            el.textContent = '全库存模式需要先在主页选择当前有效赛制。';
+            el.style.display = '';
         }
     } catch (_) {}
 }
@@ -1160,19 +1206,32 @@ function updateRetireSelectedCount() {
 }
 
 async function loadRetirePreview() {
-    const regulation = document.getElementById('retireRegulation').value;
-    if (!regulation) {
+    const scopeValue = document.getElementById('retireRegulation').value;
+    const fullInventoryCheck = scopeValue === RETIRE_FULL_INVENTORY_VALUE;
+    if (fullInventoryCheck && !retireSelectedRegulations.length) {
+        alert('请先在主页选择当前有效赛制，再使用全库存检测');
+        return;
+    }
+    if (!fullInventoryCheck && !scopeValue) {
         alert('请先选择赛制');
         return;
     }
+    const regulation = fullInventoryCheck ? '' : scopeValue;
     const skipSameName = document.getElementById('retireSkipSameName').checked;
     const includeDeckCards = document.getElementById('retireIncludeDeckCards').checked;
-    const params = new URLSearchParams({ regulation, skipSameName, includeDeckCards });
+    const params = new URLSearchParams({
+        skipSameName,
+        includeDeckCards,
+        fullInventoryCheck,
+    });
+    if (regulation) {
+        params.set('regulation', regulation);
+    }
     try {
         retireData = await api(`/api/retire/preview?${params}`);
         document.getElementById('retireStep1').style.display = 'none';
         document.getElementById('retireStep2').style.display = '';
-        document.getElementById('retireRegulationLabel').textContent = retireData.regulation + ' 标';
+        document.getElementById('retireRegulationLabel').textContent = fullInventoryCheck ? '全库存' : `${retireData.regulation} 标`;
         renderRetireCards();
     } catch (err) {
         alert(err.message);

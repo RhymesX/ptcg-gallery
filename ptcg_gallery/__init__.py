@@ -642,7 +642,8 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
         regulation = request.args.get("regulation", "").strip()
         skip_same_name = request.args.get("skipSameName", "true").lower() != "false"
         include_deck_cards = request.args.get("includeDeckCards", "true").lower() != "false"
-        if not regulation:
+        full_inventory_check = request.args.get("fullInventoryCheck", "false").lower() == "true"
+        if not full_inventory_check and not regulation:
             return jsonify({"regulation": "", "decks": [], "cards": [], "totalCount": 0, "totalQuantity": 0})
         preferences = repository.get_search_preferences()
         protected_regulations = preferences.get("selectedRegulations", []) if isinstance(preferences, dict) else []
@@ -652,6 +653,7 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
                 skip_same_name,
                 include_deck_cards,
                 protected_regulations=protected_regulations,
+                full_inventory_check=full_inventory_check,
             )
         )
 

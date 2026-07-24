@@ -81,11 +81,11 @@
   <div class="modal-card retire-modal-card" id="retireStep1">
     <button type="button" class="modal-close" id="retireCloseBtn" aria-label="关闭">×</button>
     <h2 class="modal-title">退标</h2>
-    <p class="retire-desc">选择要退标的赛制，系统将列出该赛制下你持有的所有卡牌。</p>
+    <p class="retire-desc">选择检测赛制范围，系统将列出当前库存里不再符合要求的卡牌。</p>
     <div class="retire-form">
-      <label class="retire-label">赛制</label>
+      <label class="retire-label">检测赛制范围</label>
       <select class="retire-select" id="retireRegulation">
-        <option value="">请选择赛制</option>
+        <option value="__full__">全库存（按当前已选赛制）</option>
       </select>
       <label class="retire-checkbox">
         <input type="checkbox" id="retireSkipSameName" checked>

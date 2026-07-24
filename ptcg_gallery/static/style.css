@@ -2104,6 +2104,33 @@ button:hover,
     padding-right: 2px;
 }
 
+.inventory-modal-delete-head,
+.inventory-modal-delete-cell {
+    width: 60px;
+    min-width: 60px;
+    max-width: 60px;
+}
+
+.inventory-modal-delete-btn {
+    width: 100%;
+    min-width: 0;
+    padding: 4px 0;
+    border-radius: 8px;
+    border: 1px solid #fecaca;
+    background: #fef2f2;
+    color: #b91c1c;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1.2;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+}
+
+.inventory-modal-delete-btn:hover {
+    background: #fee2e2;
+    border-color: #fca5a5;
+}
+
 .inventory-modal-actions {
     justify-content: flex-end;
 }
@@ -2508,7 +2535,9 @@ body.modal-open {
     .inventory-modal-rarity-cell,
     .inventory-modal-regulation-cell,
     .inventory-modal-qty-head,
-    .inventory-modal-qty-cell {
+    .inventory-modal-qty-cell,
+    .inventory-modal-delete-head,
+    .inventory-modal-delete-cell {
         width: 56px;
         min-width: 56px;
         max-width: 56px;

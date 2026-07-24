@@ -3,6 +3,7 @@ const LEGACY_SEARCH_REGULATION_STORAGE_KEY = 'ptcgGallery:search-regulations';
 const SEARCH_DEBOUNCE_DELAY = 500;
 
 let activeSearchController = null;
+let isSearchComposing = false;
 
 const state = {
     selectedCardId: null,
@@ -474,17 +475,17 @@ function renderCardDetail(card) {
         <div class="inventory-layout">
             <div class="inventory-card">
                 <h3>空闲库存</h3>
-                <p class="muted">当前值：${formatNumber(card.freeQuantity)}。可以直接加减，也可以输入一个新值后保存。</p>
+                <p class="muted">当前值：${formatNumber(card.freeQuantity)}。可以直接加减，也可以一次增加多张。</p>
                 <div class="inline-actions">
                     <button type="button" data-action="free-adjust" data-delta="1">空闲 +1</button>
                     <button type="button" class="secondary" data-action="free-adjust" data-delta="-1">空闲 -1</button>
                 </div>
                 <div class="detail-inline-form">
                     <label>
-                        直接设置
-                        <input id="detailFreeQuantity" type="number" min="0" step="1" value="${Number(card.freeQuantity ?? 0)}">
+                        增加数量
+                        <input id="detailFreeAddAmount" type="number" min="1" step="1" value="1">
                     </label>
-                    <button type="button" data-action="free-set">设置空闲库存</button>
+                    <button type="button" data-action="free-add-multi">增加到空闲库存</button>
                 </div>
             </div>
 
@@ -520,14 +521,13 @@ function renderCardDetail(card) {
         });
     });
 
-    const setFreeButton = elements.cardDetail.querySelector('[data-action="free-set"]');
-    if (setFreeButton) {
-        setFreeButton.addEventListener('click', async () => {
-            const quantityInput = document.getElementById('detailFreeQuantity');
+    const addFreeButton = elements.cardDetail.querySelector('[data-action="free-add-multi"]');
+    if (addFreeButton) {
+        addFreeButton.addEventListener('click', async () => {
+            const amountInput = document.getElementById('detailFreeAddAmount');
             await mutateCard(
-                `/api/cards/${card.id}/free-quantity`,
-                { quantity: Number(quantityInput?.value || 0) },
-                'PUT'
+                `/api/cards/${card.id}/adjust-total`,
+                { delta: Number(amountInput?.value || 0) }
             );
         });
     }
@@ -833,6 +833,18 @@ function debounce(fn, delay) {
 const debouncedSearch = debounce(() => refreshSearch(true), SEARCH_DEBOUNCE_DELAY);
 
 elements.searchInput.addEventListener('input', () => {
+    if (isSearchComposing) {
+        return;
+    }
+    cancelActiveSearch();
+    debouncedSearch();
+});
+elements.searchInput.addEventListener('compositionstart', () => {
+    isSearchComposing = true;
+    debouncedSearch.cancel();
+});
+elements.searchInput.addEventListener('compositionend', () => {
+    isSearchComposing = false;
     cancelActiveSearch();
     debouncedSearch();
 });

@@ -2061,10 +2061,11 @@ class CardRepository:
         skip_same_name: bool = True,
         include_deck_cards: bool = True,
         protected_regulations: list[str] | None = None,
+        full_inventory_check: bool = False,
     ) -> dict[str, Any]:
         """预览指定赛制下当前用户持有的所有卡牌，用于退标确认。"""
         target = regulation.strip().upper()
-        if not target:
+        if not full_inventory_check and not target:
             return {"regulation": "", "decks": [], "cards": [], "totalCount": 0, "totalQuantity": 0}
 
         selected_protected_regulations: list[str] = []
@@ -2075,6 +2076,9 @@ class CardRepository:
                 continue
             seen_protected_regulations.add(clean_regulation)
             selected_protected_regulations.append(clean_regulation)
+
+        if full_inventory_check and not selected_protected_regulations:
+            return {"regulation": "", "decks": [], "cards": [], "totalCount": 0, "totalQuantity": 0}
 
         with self.connect_current_account() as conn:
             cards = conn.execute(self._search_select_sql(), ()).fetchall()
@@ -2099,47 +2103,94 @@ class CardRepository:
         for row in dc_rows:
             deck_card_qty[(row["card_id"], row["deck_id"])] = row["quantity"]
 
-        # 1) 收集候选卡：regulation 匹配 + 有库存
-        candidates: list[dict[str, Any]] = []
-        for row in cards:
-            row_reg = normalize_text(row["regulation"]).upper()
-            if row_reg != target:
-                continue
-            free_qty = row["free_quantity"] or 0
-            deck_qty = row["deck_quantity"] or 0
-            total_qty = free_qty + deck_qty
-            if total_qty <= 0:
-                continue
-            if not include_deck_cards and deck_qty > 0:
-                continue
-            item = self._summary_from_row(row)
-            item["categoryKey"], item["categoryTitle"] = classify_card(row)
-            item["freeQuantity"] = free_qty
-            item["deckQuantity"] = deck_qty
-            item["ownedQuantity"] = total_qty
-            item["regulation"] = row_reg
-            candidates.append(item)
+        if full_inventory_check:
+            held_candidates: list[dict[str, Any]] = []
+            for row in cards:
+                free_qty = row["free_quantity"] or 0
+                deck_qty = row["deck_quantity"] or 0
+                total_qty = free_qty + deck_qty
+                if total_qty <= 0:
+                    continue
+                if not include_deck_cards and deck_qty > 0:
+                    continue
+                item = self._summary_from_row(row)
+                item["categoryKey"], item["categoryTitle"] = classify_card(row)
+                item["freeQuantity"] = free_qty
+                item["deckQuantity"] = deck_qty
+                item["ownedQuantity"] = total_qty
+                item["regulation"] = normalize_text(row["regulation"]).upper()
+                held_candidates.append(item)
 
-        # 2) 同名保护
-        if skip_same_name and candidates and selected_protected_regulations:
-            with self.connect_catalog() as cat_conn:
-                placeholders = ",".join("?" for _ in selected_protected_regulations)
-                other_names = {
-                    normalize_text(remove_card_name_variants(row["card_name"]))
-                    for row in cat_conn.execute(
-                        f"""
-                        SELECT DISTINCT card_name
-                        FROM cards
-                        WHERE UPPER(TRIM(COALESCE(regulation, ''))) IN ({placeholders})
-                        """,
-                        tuple(selected_protected_regulations),
-                    ).fetchall()
-                }
-            candidates = [
-                c for c in candidates
-                if is_pokemon_category_key(c["categoryKey"])
-                or normalize_text(remove_card_name_variants(c["cardName"])) not in other_names
-            ]
+            allowed_regulations = set(selected_protected_regulations)
+            same_name_regulations: dict[str, set[str]] = {}
+            for item in held_candidates:
+                regulation_name = normalize_text(item.get("regulation", "")).upper()
+                if not regulation_name:
+                    continue
+                category_key = normalize_text(item.get("categoryKey", ""))
+                if is_pokemon_category_key(category_key) or category_key == "basic_energy":
+                    continue
+                same_name_regulations.setdefault(build_search_item_same_name_key(item), set()).add(regulation_name)
+
+            candidates = []
+            for item in held_candidates:
+                category_key = normalize_text(item.get("categoryKey", ""))
+                if category_key == "basic_energy":
+                    continue
+
+                if not allowed_regulations:
+                    candidates.append(item)
+                    continue
+
+                if is_pokemon_category_key(category_key):
+                    if normalize_text(item.get("regulation", "")).upper() not in allowed_regulations:
+                        candidates.append(item)
+                    continue
+
+                if not (same_name_regulations.get(build_search_item_same_name_key(item), set()) & allowed_regulations):
+                    candidates.append(item)
+        else:
+        # 1) 收集候选卡：regulation 匹配 + 有库存
+            candidates = []
+            for row in cards:
+                row_reg = normalize_text(row["regulation"]).upper()
+                if row_reg != target:
+                    continue
+                free_qty = row["free_quantity"] or 0
+                deck_qty = row["deck_quantity"] or 0
+                total_qty = free_qty + deck_qty
+                if total_qty <= 0:
+                    continue
+                if not include_deck_cards and deck_qty > 0:
+                    continue
+                item = self._summary_from_row(row)
+                item["categoryKey"], item["categoryTitle"] = classify_card(row)
+                item["freeQuantity"] = free_qty
+                item["deckQuantity"] = deck_qty
+                item["ownedQuantity"] = total_qty
+                item["regulation"] = row_reg
+                candidates.append(item)
+
+            # 2) 同名保护
+            if skip_same_name and candidates and selected_protected_regulations:
+                with self.connect_catalog() as cat_conn:
+                    placeholders = ",".join("?" for _ in selected_protected_regulations)
+                    other_names = {
+                        normalize_text(remove_card_name_variants(row["card_name"]))
+                        for row in cat_conn.execute(
+                            f"""
+                            SELECT DISTINCT card_name
+                            FROM cards
+                            WHERE UPPER(TRIM(COALESCE(regulation, ''))) IN ({placeholders})
+                            """,
+                            tuple(selected_protected_regulations),
+                        ).fetchall()
+                    }
+                candidates = [
+                    c for c in candidates
+                    if is_pokemon_category_key(c["categoryKey"])
+                    or normalize_text(remove_card_name_variants(c["cardName"])) not in other_names
+                ]
 
         # 3) deck 分布明细
         for c in candidates:

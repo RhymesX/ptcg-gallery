@@ -354,6 +354,44 @@ class PtcgGalleryAppTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json()["cards"], [])
 
+    def test_retire_preview_full_inventory_check_detects_cards_losing_same_name_legality(self):
+        rows = [
+            ["训练家套装A", "CS6.5C", "070/072", "阿渡", "训练家", "支援者", "", "", "U", "F", 0, "", ""],
+            ["训练家套装B", "CSM1.5C", "049/060", "阿渡", "训练家", "支援者", "", "", "PR", "A", 1, "", ""],
+        ]
+        temp_dir, app, client = self._create_test_app(rows)
+        self.addCleanup(temp_dir.cleanup)
+
+        client.put(
+            "/api/search/preferences",
+            json={"selectedRegulations": ["F", "G"], "considerSameNameRegulation": True},
+        )
+        response = client.get(
+            "/api/retire/preview?skipSameName=true&includeDeckCards=true&fullInventoryCheck=true"
+        )
+        self.assertEqual(response.status_code, 200)
+        items = response.get_json()["cards"]
+        self.assertEqual([item["cardName"] for item in items], ["阿渡"])
+        self.assertEqual([item["regulation"] for item in items], ["A"])
+
+    def test_retire_preview_regulation_only_mode_does_not_include_other_marks(self):
+        rows = [
+            ["训练家套装A", "CS6.5C", "070/072", "阿渡", "训练家", "支援者", "", "", "U", "F", 0, "", ""],
+            ["训练家套装B", "CSM1.5C", "049/060", "阿渡", "训练家", "支援者", "", "", "PR", "A", 1, "", ""],
+        ]
+        temp_dir, app, client = self._create_test_app(rows)
+        self.addCleanup(temp_dir.cleanup)
+
+        client.put(
+            "/api/search/preferences",
+            json={"selectedRegulations": ["F", "G"], "considerSameNameRegulation": True},
+        )
+        response = client.get(
+            "/api/retire/preview?regulation=F&skipSameName=true&includeDeckCards=true&fullInventoryCheck=false"
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["cards"], [])
+
     def test_catalog_reload_updates_parsed_product_search_without_creating_duplicate(self):
         rows = [
             ["2023北京特典", "PROMO", "SM-P", "神奇糖果·64强", "道具", "", "", "无", "U", "标准", 1, "", ""],
@@ -1194,7 +1232,18 @@ class PtcgGalleryAppTests(unittest.TestCase):
         self.assertIn("{ label: '总持有', value: summary.ownedCount ?? 0, href: '/inventory-table' }", app_js_text)
         self.assertIn("{ label: '卡组', value: summary.deckCount ?? 0, href: '/decks' }", app_js_text)
         self.assertNotIn("href: '/holdings'", app_js_text)
+        self.assertIn("compositionstart", app_js_text)
+        self.assertIn("compositionend", app_js_text)
+        self.assertIn("detailFreeAddAmount", app_js_text)
+        self.assertIn("/api/cards/${card.id}/adjust-total", app_js_text)
         app_js.close()
+
+        inventory_table_js = self.client.get("/static/inventory_table.js")
+        self.assertEqual(inventory_table_js.status_code, 200)
+        inventory_table_js_text = inventory_table_js.get_data(as_text=True)
+        self.assertIn('data-action="delete-row-card"', inventory_table_js_text)
+        self.assertIn("deleteInventoryTableCard", inventory_table_js_text)
+        inventory_table_js.close()
 
     def test_inventory_table_group_quantity_update_sets_exact_values(self):
         self.assertEqual(self.client.get("/inventory-table").status_code, 200)
