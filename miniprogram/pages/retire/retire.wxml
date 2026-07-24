@@ -1,0 +1,93 @@
+<view class="page">
+  <view class="header">
+    <view class="page-title">退标</view>
+    <picker mode="selector" range="{{scopeOptions}}" value="{{selectedScopeIndex}}" bindchange="onScopeChange">
+      <view class="scope-picker">
+        <text class="scope-label">检测范围</text>
+        <text class="scope-value">{{scopeOptions[selectedScopeIndex] || '请选择'}}</text>
+      </view>
+    </picker>
+    <view class="setting-row compact">
+      <view class="setting-label">跳过同名卡组</view>
+      <switch checked="{{skipSameName}}" bindchange="onSkipSameNameChange" color="#f5b700" />
+    </view>
+    <view class="setting-row compact">
+      <view class="setting-label">包含卡组卡牌</view>
+      <switch checked="{{includeDeckCards}}" bindchange="onIncludeDeckCardsChange" color="#f5b700" />
+    </view>
+    <view wx:if="{{currentRegulationText}}" class="notice">{{currentRegulationText}}</view>
+    <view wx:if="{{previewNotice}}" class="notice warning">{{previewNotice}}</view>
+  </view>
+
+  <scroll-view scroll-y class="content">
+    <view class="summary-card">
+      <view class="summary-item">
+        <text class="summary-number">{{totalCount}}</text>
+        <text class="summary-label">种预览卡</text>
+      </view>
+      <view class="summary-item">
+        <text class="summary-number">{{totalQuantity}}</text>
+        <text class="summary-label">张可退标</text>
+      </view>
+      <view class="summary-item">
+        <text class="summary-number">{{selectedCount}}</text>
+        <text class="summary-label">已选卡种</text>
+      </view>
+      <view class="summary-item">
+        <text class="summary-number">{{selectedQuantity}}</text>
+        <text class="summary-label">已选张数</text>
+      </view>
+    </view>
+
+    <view wx:if="{{previewLoading}}" class="loading">加载预览中...</view>
+
+    <block wx:if="{{cards.length > 0}}">
+      <view class="select-all-row" bindtap="toggleAll">
+        <view class="check-box {{selectedCount === cards.length && cards.length > 0 ? 'checked' : ''}}"></view>
+        <text>全选 / 全不选</text>
+      </view>
+      <block wx:for="{{cards}}" wx:key="id" wx:for-item="card" wx:for-index="index">
+        <view class="retire-card {{card.selected ? 'active' : ''}}" data-index="{{index}}" bindtap="toggleCard">
+          <view class="check-box {{card.selected ? 'checked' : ''}}"></view>
+          <view class="retire-main" data-card-id="{{card.id}}" catchtap="onCardTap">
+            <view class="retire-title">{{card.cardName}}</view>
+            <view class="retire-meta">{{card.productCode}} {{card.cardCode}} {{card.rarity || ''}}</view>
+            <view class="retire-tags">
+              <text class="tag qty">共 {{card.ownedQuantity || 0}} 张</text>
+              <text wx:if="{{card.freeQuantity > 0}}" class="tag free">空闲 {{card.freeQuantity}}</text>
+              <text wx:for="{{card.deckBreakdown || []}}" wx:key="deckId" wx:for-item="deck" class="tag deck" style="background:{{deck.color}}22;color:{{deck.color}};">
+                {{deck.deckName}} {{deck.quantity}}
+              </text>
+            </view>
+          </view>
+        </view>
+      </block>
+    </block>
+
+    <view wx:if="{{!previewLoading && cards.length === 0}}" class="empty">没有符合条件的卡牌</view>
+  </scroll-view>
+
+  <view class="footer">
+    <view class="footer-count">已选 {{selectedCount}} 种 / {{selectedQuantity}} 张</view>
+    <button class="execute-btn" loading="{{executing}}" bindtap="executeRetire">执行退标</button>
+  </view>
+
+  <view class="navbar">
+    <view class="nav-item" bindtap="goToSearch">
+      <text class="nav-icon">🔍</text>
+      <text>搜索</text>
+    </view>
+    <view class="nav-item" bindtap="goToHoldings">
+      <text class="nav-icon">📦</text>
+      <text>仓库</text>
+    </view>
+    <view class="nav-item" bindtap="goToDecks">
+      <text class="nav-icon">🗃</text>
+      <text>卡组</text>
+    </view>
+    <view class="nav-item" bindtap="goToProfile">
+      <text class="nav-icon">👤</text>
+      <text>我的</text>
+    </view>
+  </view>
+</view>

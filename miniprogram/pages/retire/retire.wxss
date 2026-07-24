@@ -1,0 +1,201 @@
+.page-title {
+  font-size: 36rpx;
+  font-weight: bold;
+}
+
+.scope-picker {
+  margin-top: 12rpx;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #252550;
+  border-radius: 12rpx;
+  padding: 18rpx 20rpx;
+}
+
+.scope-label {
+  font-size: 26rpx;
+  color: #9ca3af;
+}
+
+.scope-value {
+  font-size: 28rpx;
+  color: #e0e0e0;
+}
+
+.setting-row.compact {
+  margin-top: 12rpx;
+}
+
+.notice {
+  margin-top: 12rpx;
+  padding: 16rpx 20rpx;
+  border-radius: 12rpx;
+  background: #1a1a3e;
+  color: #c7d2fe;
+  font-size: 24rpx;
+}
+
+.notice.warning {
+  color: #fca5a5;
+}
+
+.content {
+  padding-bottom: 180rpx;
+}
+
+.summary-card {
+  margin: 16rpx 0 24rpx;
+  padding: 24rpx 20rpx;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16rpx;
+  background: #17172f;
+  border-radius: 16rpx;
+}
+
+.summary-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6rpx;
+  background: #202047;
+  border-radius: 12rpx;
+  padding: 20rpx;
+}
+
+.summary-number {
+  font-size: 36rpx;
+  font-weight: bold;
+  color: #f5b700;
+}
+
+.summary-label {
+  font-size: 24rpx;
+  color: #9ca3af;
+}
+
+.loading, .empty {
+  text-align: center;
+  padding: 80rpx 0;
+  color: #6b7280;
+  font-size: 28rpx;
+}
+
+.select-all-row {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  padding: 0 8rpx 16rpx;
+  font-size: 26rpx;
+  color: #d1d5db;
+}
+
+.check-box {
+  width: 28rpx;
+  height: 28rpx;
+  border-radius: 8rpx;
+  border: 2rpx solid #6b7280;
+  box-sizing: border-box;
+  position: relative;
+  flex-shrink: 0;
+}
+
+.check-box.checked {
+  background: #f5b700;
+  border-color: #f5b700;
+}
+
+.check-box.checked::after {
+  content: '';
+  position: absolute;
+  left: 8rpx;
+  top: 3rpx;
+  width: 8rpx;
+  height: 14rpx;
+  border-right: 4rpx solid #1a1a2e;
+  border-bottom: 4rpx solid #1a1a2e;
+  transform: rotate(45deg);
+}
+
+.retire-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 16rpx;
+  padding: 20rpx 16rpx;
+  margin-bottom: 12rpx;
+  border-radius: 16rpx;
+  background: #1a1a3e;
+}
+
+.retire-card.active {
+  box-shadow: inset 0 0 0 1px rgba(245, 183, 0, 0.5);
+}
+
+.retire-main {
+  flex: 1;
+}
+
+.retire-title {
+  font-size: 30rpx;
+  color: #fff;
+}
+
+.retire-meta {
+  margin-top: 6rpx;
+  font-size: 24rpx;
+  color: #9ca3af;
+}
+
+.retire-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8rpx;
+  margin-top: 10rpx;
+}
+
+.tag {
+  font-size: 22rpx;
+  padding: 4rpx 12rpx;
+  border-radius: 8rpx;
+}
+
+.tag.qty {
+  background: #1e293b;
+  color: #cbd5e1;
+}
+
+.tag.free {
+  background: #1a3a2e;
+  color: #4ade80;
+}
+
+.tag.deck {
+  background: #334155;
+}
+
+.footer {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 112rpx;
+  background: rgba(15, 15, 35, 0.96);
+  border-top: 1rpx solid rgba(255, 255, 255, 0.06);
+  padding: 18rpx 24rpx;
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+  z-index: 20;
+}
+
+.footer-count {
+  flex: 1;
+  font-size: 26rpx;
+  color: #d1d5db;
+}
+
+.execute-btn {
+  flex-shrink: 0;
+  background: #f5b700;
+  color: #1a1a2e;
+  font-weight: bold;
+}

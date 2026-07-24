@@ -7,7 +7,8 @@
     "pages/holdings/holdings",
     "pages/decks/decks",
     "pages/deck-detail/deck-detail",
-    "pages/profile/profile"
+    "pages/profile/profile",
+    "pages/retire/retire"
   ],
   "window": {
     "navigationBarTitleText": "PTCG 卡牌收藏",

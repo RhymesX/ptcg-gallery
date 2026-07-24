@@ -2,7 +2,9 @@ const { getToken, clearToken } = require('./auth');
 
 function getBaseUrl() {
   const app = getApp();
-  return (app && app.globalData && app.globalData.apiBaseUrl) || '';
+  const baseUrl = app && app.globalData && app.globalData.apiBaseUrl;
+  if (baseUrl) return baseUrl;
+  return (app && app.globalData && app.globalData.defaultApiBaseUrl) || '';
 }
 
 function api(method, path, data) {

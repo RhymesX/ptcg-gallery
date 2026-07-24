@@ -168,16 +168,27 @@ class PtcgGalleryAppTests(unittest.TestCase):
         item = next(item for item in payload["items"] if item["cardName"] == card_name)
         return item["id"]
 
-    def _generate_invite_code(self, client) -> str:
+    def _generate_invite_code(self, client, expires_in_days: int = 1) -> str:
         """以管理员身份生成邀请码并返回 code 字符串。"""
         with client.session_transaction() as session:
             session["account_id"] = 1
             session["account_name"] = "RhymesX"
             session["is_admin"] = True
-        data = client.post("/api/invite-codes").get_json()
+        data = client.post("/api/invite-codes", json={"expiresInDays": expires_in_days}).get_json()
         codes = data.get("codes", [])
         self.assertTrue(len(codes) > 0, "应至少有一个邀请码")
         return codes[0]["code"]
+
+    def test_admin_can_generate_10_day_invite_code(self):
+        with self.client.session_transaction() as session:
+            session["account_id"] = 1
+            session["account_name"] = "RhymesX"
+            session["is_admin"] = True
+        response = self.client.post("/api/invite-codes", json={"expiresInDays": 10})
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertGreaterEqual(len(payload.get("codes", [])), 1)
+        self.assertTrue(payload["codes"][0]["expiresAt"])
 
     def test_exact_code_search_returns_multiple_cards(self):
         decks = self.client.get("/api/decks")
@@ -1579,8 +1590,8 @@ class DbSplitIntegrationTests(unittest.TestCase):
         self.fail(f"Account {name} not found after creation")
         return 0
 
-    def _generate_invite_code(self) -> str:
-        resp = self.client.post("/api/invite-codes").get_json()
+    def _generate_invite_code(self, expires_in_days: int = 1) -> str:
+        resp = self.client.post("/api/invite-codes", json={"expiresInDays": expires_in_days}).get_json()
         return resp["codes"][0]["code"]
 
     def _login_as(self, name: str):

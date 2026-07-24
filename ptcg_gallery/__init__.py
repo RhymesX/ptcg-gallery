@@ -451,7 +451,11 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
         """管理员生成新邀请码。"""
         if not session.get("is_admin"):
             return jsonify({"error": "无权操作"}), 403
-        return jsonify(repository.generate_invite_code())
+        payload = request.get_json(silent=True) or {}
+        expires_in_days = int(payload.get("expiresInDays", 1) or 1)
+        if expires_in_days <= 0:
+            return jsonify({"error": "邀请码有效天数必须大于 0"}), 400
+        return jsonify(repository.generate_invite_code(expires_in_days=expires_in_days))
 
     @app.get("/api/holdings")
     def holdings():

@@ -40,6 +40,41 @@
   font-size: 30rpx;
 }
 
+.server-card {
+  background: #1a1a3e;
+  border-radius: 12rpx;
+  padding: 24rpx;
+}
+
+.server-label {
+  font-size: 26rpx;
+  color: #9ca3af;
+  margin-bottom: 16rpx;
+}
+
+.server-input {
+  width: 100%;
+  box-sizing: border-box;
+  background: #252550;
+  border-radius: 10rpx;
+  padding: 18rpx 20rpx;
+  color: #e0e0e0;
+  font-size: 28rpx;
+}
+
+.server-actions {
+  display: flex;
+  gap: 16rpx;
+  margin-top: 16rpx;
+}
+
+.server-status {
+  margin-top: 16rpx;
+  font-size: 24rpx;
+  color: #9ca3af;
+  line-height: 1.5;
+}
+
 .retire-btn {
   width: 100%;
   background: #1a1a3e;

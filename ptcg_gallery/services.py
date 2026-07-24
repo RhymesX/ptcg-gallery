@@ -939,14 +939,16 @@ class CardRepository:
 
     # ── 邀请码 ─────────────────────────────────────────────
 
-    def generate_invite_code(self) -> dict[str, Any]:
+    def generate_invite_code(self, expires_in_days: int = 1) -> dict[str, Any]:
         """管理员生成一个 24 小时有效的邀请码。"""
         import uuid
         code = str(uuid.uuid4())[:8].upper()
+        if int(expires_in_days) <= 0:
+            raise ValueError("邀请码有效天数必须大于 0")
         with self.connect() as conn:
             conn.execute(
-                "INSERT INTO invite_codes(code, expires_at) VALUES (?, datetime('now', '+1 day'))",
-                (code,),
+                "INSERT INTO invite_codes(code, expires_at) VALUES (?, datetime('now', ?))",
+                (code, f"+{int(expires_in_days)} day"),
             )
         return self.list_invite_codes()
 

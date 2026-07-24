@@ -37,6 +37,7 @@ const els = {
     deleteBtn: document.getElementById('adminDeleteAccountBtn'),
     accountStatus: document.getElementById('accountStatus'),
     generateInviteBtn: document.getElementById('generateInviteBtn'),
+    generateInvite10DaysBtn: document.getElementById('generateInvite10DaysBtn'),
     inviteCodeList: document.getElementById('inviteCodeList'),
     inviteStatus: document.getElementById('inviteStatus'),
     toggleInviteBtn: document.getElementById('toggleInviteBtn'),
@@ -131,11 +132,15 @@ async function loadInviteCodes() {
     }
 }
 
-async function generateInviteCode() {
+async function generateInviteCode(expiresInDays = 1) {
     try {
-        await api('/api/invite-codes', { method: 'POST' });
+        await api('/api/invite-codes', { method: 'POST', body: { expiresInDays } });
         await loadInviteCodes();
-        setStatus(els.inviteStatus, '邀请码已生成，有效期 24 小时。', 'success');
+        setStatus(
+            els.inviteStatus,
+            `邀请码已生成，有效期 ${expiresInDays === 1 ? '24 小时' : `${expiresInDays} 天`}。`,
+            'success'
+        );
     } catch (error) {
         setStatus(els.inviteStatus, error.message, 'warning');
     }
@@ -218,7 +223,8 @@ els.resetPasswordInput?.addEventListener('keydown', (event) => {
     if (event.key === 'Enter') { event.preventDefault(); resetPassword(); }
 });
 els.deleteBtn?.addEventListener('click', deleteAccount);
-els.generateInviteBtn?.addEventListener('click', generateInviteCode);
+els.generateInviteBtn?.addEventListener('click', () => generateInviteCode(1));
+els.generateInvite10DaysBtn?.addEventListener('click', () => generateInviteCode(10));
 els.toggleInviteBtn?.addEventListener('click', toggleInviteRequired);
 
 function initCrawlerControls() {

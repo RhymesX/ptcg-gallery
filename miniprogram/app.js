@@ -3,13 +3,27 @@ const { api } = require('./utils/api');
 
 App({
   globalData: {
-    // 开发时改成本地地址，上线后改成 https://你的域名
-    // 微信开发者工具中需勾选「不校验合法域名」
-    apiBaseUrl: 'http://127.0.0.1:8000'
+    // 开发时默认连本地，发布后可以在「我的」页里改成线上服务器
+    // 微信开发者工具中如需直连本地，请勾选「不校验合法域名」
+    defaultApiBaseUrl: 'http://127.0.0.1:8000',
+    apiBaseUrl: ''
   },
 
   onLaunch() {
+    this.loadApiBaseUrl();
     this.autoLogin();
+  },
+
+  loadApiBaseUrl() {
+    const saved = wx.getStorageSync('apiBaseUrl');
+    this.globalData.apiBaseUrl = saved || this.globalData.defaultApiBaseUrl;
+  },
+
+  updateApiBaseUrl(url) {
+    const next = (url || '').trim().replace(/\/+$/, '');
+    this.globalData.apiBaseUrl = next || this.globalData.defaultApiBaseUrl;
+    wx.setStorageSync('apiBaseUrl', this.globalData.apiBaseUrl);
+    return this.globalData.apiBaseUrl;
   },
 
   autoLogin() {
@@ -35,17 +49,17 @@ App({
             this.loadSummary();
           })
           .catch((err) => {
-            this.onLoginFailed();
+            this.onLoginFailed(err && err.message ? err.message : '');
           });
       },
       fail: () => {
-        this.onLoginFailed();
+        this.onLoginFailed('');
       }
     });
   },
 
-  onLoginFailed() {
-    wx.showToast({ title: '登录失败，请重试', icon: 'none' });
+  onLoginFailed(message) {
+    wx.showToast({ title: message || '登录失败，请重试', icon: 'none' });
   },
 
   loadSummary() {
