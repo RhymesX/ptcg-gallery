@@ -3,15 +3,26 @@ const { api } = require('./utils/api');
 
 App({
   globalData: {
-    // 开发时默认连本地，发布后可以在「我的」页里改成线上服务器
-    // 微信开发者工具中如需直连本地，请勾选「不校验合法域名」
-    defaultApiBaseUrl: 'http://127.0.0.1:8000',
-    apiBaseUrl: ''
+    // 体验版/正式版默认连线上，开发时可在登录页改回本地地址
+    // 微信开发者工具如需直连本地，请勾选「不校验合法域名」
+    defaultApiBaseUrl: 'https://rhymesx.top',
+    apiBaseUrl: '',
+    isDevtools: false
   },
 
   onLaunch() {
+    this.detectRuntime();
     this.loadApiBaseUrl();
     this.autoLogin();
+  },
+
+  detectRuntime() {
+    try {
+      const info = wx.getSystemInfoSync();
+      this.globalData.isDevtools = info.platform === 'devtools';
+    } catch (_) {
+      this.globalData.isDevtools = false;
+    }
   },
 
   loadApiBaseUrl() {
@@ -46,6 +57,7 @@ App({
             setToken(data.token);
             wx.setStorageSync('accountId', data.accountId);
             wx.setStorageSync('accountName', data.accountName);
+            wx.setStorageSync('isAdmin', !!data.isAdmin);
             this.loadSummary();
           })
           .catch((err) => {

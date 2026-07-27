@@ -8,6 +8,7 @@
     "pages/decks/decks",
     "pages/deck-detail/deck-detail",
     "pages/profile/profile",
+    "pages/admin/admin",
     "pages/retire/retire"
   ],
   "window": {

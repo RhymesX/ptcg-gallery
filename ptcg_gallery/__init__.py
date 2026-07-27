@@ -17,6 +17,7 @@ from .services import (
     AppPaths,
     CardRepository,
     ConflictError,
+    DEFAULT_ACCOUNT_NAME,
     NotFoundError,
     ServiceError,
     build_paths,
@@ -34,6 +35,28 @@ def _load_session_account(repository: CardRepository) -> dict[str, Any] | None:
     if account is None or int(account.get("id", 0) or 0) != account_id:
         return None
     return account
+
+
+def _load_request_account(repository: CardRepository) -> dict[str, Any] | None:
+    account = _load_session_account(repository)
+    if account is not None:
+        return account
+    try:
+        with repository.connect_catalog() as conn:
+            account_id = repository.get_current_account_id(conn)
+            row = conn.execute("SELECT id, name FROM accounts WHERE id = ?", (account_id,)).fetchone()
+    except Exception:
+        return None
+    return dict(row) if row is not None else None
+
+
+def _is_request_admin(repository: CardRepository) -> bool:
+    if bool(session.get("is_admin")):
+        return True
+    account = _load_request_account(repository)
+    if account is None:
+        return False
+    return normalize_text(account.get("name", "")) == normalize_text(DEFAULT_ACCOUNT_NAME)
 
 
 def _load_auth_config(data_dir: str, test_config: dict[str, Any] | None = None) -> dict[str, str]:
@@ -165,12 +188,14 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
             if payload is not None:
                 account_id = int(payload["sub"])
                 with repository.connect_catalog() as conn:
-                    row = conn.execute("SELECT id FROM accounts WHERE id = ?", (account_id,)).fetchone()
+                    row = conn.execute("SELECT id, name FROM accounts WHERE id = ?", (account_id,)).fetchone()
                 if row is not None:
+                    session["is_admin"] = normalize_text(row["name"]) == normalize_text(DEFAULT_ACCOUNT_NAME)
                     repository.set_request_account_id(account_id)
                     return None
 
         repository.clear_request_account_id()
+        session.pop("is_admin", None)
         # 对 API 请求返回 401，对页面请求重定向到登录页
         if request.path.startswith("/api/"):
             return jsonify({"error": "未登录"}), 401
@@ -262,7 +287,7 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
 
     @app.get("/api/accounts")
     def list_accounts():
-        account = _load_session_account(repository)
+        account = _load_request_account(repository)
         payload = repository.list_accounts()
         return jsonify(payload | {"current": account, "isAdmin": bool(session.get("is_admin"))})
 
@@ -322,6 +347,7 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
                 "token": token,
                 "accountId": account_id,
                 "accountName": account_name,
+                "isAdmin": normalize_text(account_name) == normalize_text(DEFAULT_ACCOUNT_NAME),
             })
 
         # 未绑定账号
@@ -336,6 +362,7 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
                 "token": token,
                 "accountId": result["id"],
                 "accountName": result["name"],
+                "isAdmin": normalize_text(result["name"]) == normalize_text(DEFAULT_ACCOUNT_NAME),
             })
 
         # 开关打开，需要邀请码
@@ -353,6 +380,7 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
             "token": token,
             "accountId": result["id"],
             "accountName": result["name"],
+            "isAdmin": normalize_text(result["name"]) == normalize_text(DEFAULT_ACCOUNT_NAME),
         })
 
     @app.post("/api/wx/bind")
@@ -387,6 +415,7 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
             "token": token,
             "accountId": int(account["id"]),
             "accountName": account["name"],
+            "isAdmin": normalize_text(account["name"]) == normalize_text(DEFAULT_ACCOUNT_NAME),
         })
 
     @app.post("/api/account/bind-code")

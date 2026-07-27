@@ -66,6 +66,7 @@ Page({
           setToken(data.token);
           wx.setStorageSync('accountId', data.accountId);
           wx.setStorageSync('accountName', data.accountName);
+          wx.setStorageSync('isAdmin', !!data.isAdmin);
           wx.redirectTo({ url: '/pages/holdings/holdings' });
         }).catch((err) => {
           this.setData({
@@ -92,6 +93,7 @@ Page({
       setToken(data.token);
       wx.setStorageSync('accountId', data.accountId);
       wx.setStorageSync('accountName', data.accountName);
+      wx.setStorageSync('isAdmin', !!data.isAdmin);
       wx.redirectTo({ url: '/pages/holdings/holdings' });
     }).catch((err) => {
       this.setData({

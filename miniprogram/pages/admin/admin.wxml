@@ -1,0 +1,72 @@
+<view class="page">
+  <view class="header">
+    <view class="page-title">管理后台</view>
+    <button size="mini" bindtap="goBack">返回</button>
+  </view>
+
+  <scroll-view scroll-y class="content">
+    <view wx:if="{{loading}}" class="empty">正在加载管理数据...</view>
+
+    <block wx:if="{{!loading && isAdmin}}">
+      <view class="section">
+        <view class="section-title">当前管理员</view>
+        <view class="section-card">
+          <view class="strong-text">{{accountName}}</view>
+          <view class="muted-text">只有管理员账号能看到这个页面</view>
+        </view>
+      </view>
+
+      <view class="section">
+        <view class="section-title">邀请码</view>
+        <view class="section-card">
+          <view class="button-grid">
+            <button class="primary-btn" bindtap="onGenerateInvite1Day">生成 1 天码</button>
+            <button class="primary-btn" bindtap="onGenerateInvite10Days">生成 10 天码</button>
+          </view>
+          <view class="toggle-row">
+            <view>
+              <view class="strong-text">注册需要邀请码</view>
+              <view class="muted-text">{{requireInvite ? '当前已开启' : '当前已关闭'}}</view>
+            </view>
+            <switch checked="{{requireInvite}}" bindchange="onToggleInviteRequired" color="#f5b700" />
+          </view>
+          <view wx:if="{{inviteStatus}}" class="status-text">{{inviteStatus}}</view>
+          <view class="list-title">有效邀请码</view>
+          <view wx:if="{{inviteCodes.length === 0}}" class="muted-text">暂无有效邀请码</view>
+          <block wx:for="{{inviteCodes}}" wx:key="code">
+            <view class="list-row">
+              <text class="code-text">{{item.code}}</text>
+              <text class="muted-text">{{item.expiresAt}}</text>
+            </view>
+          </block>
+        </view>
+      </view>
+
+      <view class="section">
+        <view class="section-title">卡图爬虫</view>
+        <view class="section-card">
+          <view class="mode-grid">
+            <block wx:for="{{modeOptions}}" wx:key="value">
+              <button
+                class="mode-btn {{crawlerMode === item.value ? 'mode-btn-active' : ''}}"
+                data-mode="{{item.value}}"
+                bindtap="onSetCrawlerMode"
+              >
+                {{item.label}}
+              </button>
+            </block>
+          </view>
+          <view class="status-text">{{crawlerStatusText}}</view>
+        </view>
+      </view>
+
+      <view class="section">
+        <view class="section-title">昵称索引</view>
+        <view class="section-card">
+          <button class="primary-btn" bindtap="onReloadNicknames">重新加载昵称</button>
+          <view wx:if="{{nicknameStatus}}" class="status-text">{{nicknameStatus}}</view>
+        </view>
+      </view>
+    </block>
+  </scroll-view>
+</view>

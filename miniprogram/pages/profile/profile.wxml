@@ -22,27 +22,13 @@
     </view>
 
     <view class="setting-group">
-      <view class="setting-title">服务器</view>
-      <view class="server-card">
-        <view class="server-label">API 基址</view>
-        <input
-          class="server-input"
-          placeholder="https://你的线上域名或 http://127.0.0.1:8000"
-          value="{{apiBaseUrl}}"
-          bindinput="onApiBaseUrlInput"
-        />
-        <view class="server-actions">
-          <button size="mini" type="primary" bindtap="onSaveApiBaseUrl">保存</button>
-          <button size="mini" bindtap="testConnection">测试连接</button>
-          <button size="mini" bindtap="onResetApiBaseUrl">恢复默认</button>
-        </view>
-        <view wx:if="{{connectionStatus}}" class="server-status">{{connectionStatus}}</view>
-      </view>
-    </view>
-
-    <view class="setting-group">
       <view class="setting-title">工具</view>
       <button class="retire-btn" bindtap="onRetireTap">退标</button>
+    </view>
+
+    <view class="setting-group" wx:if="{{isAdmin}}">
+      <view class="setting-title">管理员</view>
+      <button class="admin-btn" bindtap="onAdminTap">进入管理后台</button>
     </view>
 
     <view class="setting-group">

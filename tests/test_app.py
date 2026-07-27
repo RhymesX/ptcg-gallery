@@ -10,6 +10,7 @@ from openpyxl import Workbook
 from openpyxl.styles import PatternFill
 
 from ptcg_gallery import create_app
+from ptcg_gallery.wx_auth import create_jwt
 
 
 ATTRIBUTE_FILL_COLORS = {
@@ -189,6 +190,18 @@ class PtcgGalleryAppTests(unittest.TestCase):
         payload = response.get_json()
         self.assertGreaterEqual(len(payload.get("codes", [])), 1)
         self.assertTrue(payload["codes"][0]["expiresAt"])
+
+    def test_jwt_admin_can_access_admin_api(self):
+        with self.client.session_transaction() as session:
+            session.clear()
+        token = create_jwt(1, "RhymesX")
+        response = self.client.get(
+            "/api/invite-codes",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertIn("codes", payload)
 
     def test_exact_code_search_returns_multiple_cards(self):
         decks = self.client.get("/api/decks")

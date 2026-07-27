@@ -9,7 +9,8 @@ Page({
   data: {
     loading: true,
     apiBaseUrl: '',
-    connectionStatus: ''
+    connectionStatus: '',
+    showServerConfig: false
   },
 
   onLoad() {
@@ -17,8 +18,11 @@ Page({
       wx.redirectTo({ url: '/pages/holdings/holdings' });
     }
     const app = getApp();
+    const apiBaseUrl = wx.getStorageSync(API_BASE_URL_KEY) || (app.globalData.defaultApiBaseUrl || '');
+    this._pendingApiBaseUrl = apiBaseUrl;
     this.setData({
-      apiBaseUrl: wx.getStorageSync(API_BASE_URL_KEY) || (app.globalData.defaultApiBaseUrl || '')
+      apiBaseUrl,
+      showServerConfig: !!(app.globalData && app.globalData.isDevtools)
     });
   },
 
@@ -67,18 +71,26 @@ Page({
   },
 
   onApiBaseUrlInput(e) {
-    this.setData({ apiBaseUrl: e.detail.value });
+    this._pendingApiBaseUrl = e.detail.value;
+  },
+
+  onApiBaseUrlBlur(e) {
+    const value = e && e.detail ? e.detail.value : this._pendingApiBaseUrl;
+    this._pendingApiBaseUrl = value;
+    this.setData({ apiBaseUrl: value });
   },
 
   saveApiBaseUrl() {
     const app = getApp();
-    const saved = app.updateApiBaseUrl(this.data.apiBaseUrl || '');
+    const saved = app.updateApiBaseUrl(this._pendingApiBaseUrl || this.data.apiBaseUrl || '');
+    this._pendingApiBaseUrl = saved;
     this.setData({ apiBaseUrl: saved, connectionStatus: '已保存' });
   },
 
   resetApiBaseUrl() {
     const app = getApp();
     const saved = app.updateApiBaseUrl('');
+    this._pendingApiBaseUrl = saved;
     this.setData({ apiBaseUrl: saved, connectionStatus: '已恢复默认' });
   },
 

@@ -2,15 +2,16 @@
   <view class="login-card">
     <view class="login-icon">◆</view>
     <view class="login-title">PTCG 卡牌收藏</view>
-    <view class="login-subtitle">先配置线上服务器，再进行微信登录</view>
+    <view class="login-subtitle">{{showServerConfig ? '开发环境可切换服务器地址' : '当前将直接连接线上服务器'}}</view>
 
-    <view class="login-form">
+    <view class="login-form" wx:if="{{showServerConfig}}">
       <view class="field-label">API 基址</view>
       <input
         class="server-input"
         placeholder="https://rhymesx.top"
         value="{{apiBaseUrl}}"
         bindinput="onApiBaseUrlInput"
+        bindblur="onApiBaseUrlBlur"
       />
       <view class="button-row">
         <button size="mini" bindtap="saveApiBaseUrl">保存</button>
