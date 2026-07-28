@@ -5,7 +5,7 @@ App({
   globalData: {
     // 体验版/正式版默认连线上，开发时可在登录页改回本地地址
     // 微信开发者工具如需直连本地，请勾选「不校验合法域名」
-    defaultApiBaseUrl: 'https://rhymesx.top',
+    defaultApiBaseUrl: 'https://ptcggallery.rhymesx.top',
     apiBaseUrl: '',
     isDevtools: false
   },

@@ -8,7 +8,7 @@
       <view class="field-label">API 基址</view>
       <input
         class="server-input"
-        placeholder="https://rhymesx.top"
+        placeholder="https://ptcggallery.rhymesx.top"
         value="{{apiBaseUrl}}"
         bindinput="onApiBaseUrlInput"
         bindblur="onApiBaseUrlBlur"
