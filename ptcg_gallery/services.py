@@ -2125,32 +2125,32 @@ class CardRepository:
 
             allowed_regulations = set(selected_protected_regulations)
             same_name_regulations: dict[str, set[str]] = {}
-            for item in held_candidates:
-                regulation_name = normalize_text(item.get("regulation", "")).upper()
-                if not regulation_name:
-                    continue
-                category_key = normalize_text(item.get("categoryKey", ""))
-                if is_pokemon_category_key(category_key) or category_key == "basic_energy":
-                    continue
-                same_name_regulations.setdefault(build_search_item_same_name_key(item), set()).add(regulation_name)
+            if skip_same_name:
+                # 同名保护依据完整卡牌目录，不要求持有有效赛制的版本。
+                for row in cards:
+                    regulation_name = normalize_text(row["regulation"]).upper()
+                    if regulation_name not in allowed_regulations:
+                        continue
+                    category_key, _ = classify_card(row)
+                    if is_pokemon_category_key(category_key) or category_key == "basic_energy":
+                        continue
+                    item = self._summary_from_row(row)
+                    same_name_regulations.setdefault(build_search_item_same_name_key(item), set()).add(regulation_name)
 
             candidates = []
             for item in held_candidates:
                 category_key = normalize_text(item.get("categoryKey", ""))
                 if category_key == "basic_energy":
                     continue
-
-                if not allowed_regulations:
-                    candidates.append(item)
+                if normalize_text(item.get("regulation", "")).upper() in allowed_regulations:
                     continue
-
-                if is_pokemon_category_key(category_key):
-                    if normalize_text(item.get("regulation", "")).upper() not in allowed_regulations:
-                        candidates.append(item)
-                    continue
-
-                if not (same_name_regulations.get(build_search_item_same_name_key(item), set()) & allowed_regulations):
+                if (
+                    not skip_same_name
+                    or is_pokemon_category_key(category_key)
+                    or not (same_name_regulations.get(build_search_item_same_name_key(item), set()) & allowed_regulations)
+                ):
                     candidates.append(item)
+
         else:
         # 1) 收集候选卡：regulation 匹配 + 有库存
             candidates = []
