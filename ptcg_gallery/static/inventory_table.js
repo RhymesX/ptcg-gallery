@@ -561,6 +561,14 @@ function renderInventoryTableContent(report) {
 }
 
 function renderInventoryTable(report, summary) {
+    // 仅调整库存表格的展示顺序，不改变其他页面共用的分类顺序。
+    const sections = [...(report.sections || [])];
+    const stadiumIndex = sections.findIndex((section) => section.key === 'stadium');
+    const toolIndex = sections.findIndex((section) => section.key === 'tool');
+    if (stadiumIndex !== -1 && toolIndex !== -1) {
+        [sections[stadiumIndex], sections[toolIndex]] = [sections[toolIndex], sections[stadiumIndex]];
+    }
+    report = { ...report, sections };
     state.report = report;
     state.summary = summary;
     renderSummary(summary);
