@@ -388,7 +388,7 @@ class PtcgGalleryAppTests(unittest.TestCase):
 
         client.put(
             "/api/search/preferences",
-            json={"selectedRegulations": ["F", "G"], "considerSameNameRegulation": True},
+            json={"selectedRegulations": ["G", "H", "I", "J"], "considerSameNameRegulation": True},
         )
         response = client.get(
             "/api/retire/preview?skipSameName=true&includeDeckCards=true&fullInventoryCheck=true"
@@ -517,6 +517,9 @@ class PtcgGalleryAppTests(unittest.TestCase):
         )
         self.assertEqual(len(ex_group["items"]), 1)
         self.assertEqual(ex_group["items"][0]["cardName"], "一对鼠ex")
+
+        section_keys = [section["key"] for section in payload["sections"]]
+        self.assertLess(section_keys.index("tool"), section_keys.index("stadium"))
 
         categories = {section["key"]: sum(len(group["items"]) for group in section["groups"]) for section in payload["sections"]}
         self.assertGreaterEqual(categories["pokemon_gx"], 1)

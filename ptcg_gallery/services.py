@@ -105,8 +105,8 @@ CARD_CATEGORY_DEFINITIONS = [
     ("radiant_pokemon", "光辉宝可梦"),
     ("item", "物品"),
     ("supporter", SUPPORTER_LABEL),
-    ("stadium", "竞技场"),
     ("tool", "道具"),
+    ("stadium", "竞技场"),
     ("special_energy", "特殊能量"),
     ("basic_energy", "普通能量"),
 ]
